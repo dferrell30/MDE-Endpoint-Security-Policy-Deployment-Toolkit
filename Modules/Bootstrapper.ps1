@@ -1,15 +1,46 @@
-function Invoke-MDEBootstrap {
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
 
-    if (-not (Get-Module -ListAvailable Microsoft.Graph)) {
-        Install-Module Microsoft.Graph -Scope CurrentUser -Force
-    }
-
-    Import-Module Microsoft.Graph
-
-    Connect-MgGraph -Scopes @(
-        "DeviceManagementConfiguration.ReadWrite.All",
-        "Directory.Read.All"
+function Initialize-MDEDeployment {
+    $requiredModules = @(
+        'Microsoft.Graph.Authentication'
     )
 
-    Select-MgProfile beta
+    foreach ($module in $requiredModules) {
+        if (-not (Get-Module -ListAvailable -Name $module)) {
+            Install-Module -Name $module -Scope CurrentUser -Repository PSGallery -Force -AllowClobber
+        }
+    }
+
+    Import-Module Microsoft.Graph.Authentication -Force
+
+    $ctx = $null
+    try {
+        $ctx = Get-MgContext
+    }
+    catch {
+        $ctx = $null
+    }
+
+    if (-not $ctx) {
+        Connect-MgGraph -Scopes @(
+            'DeviceManagementConfiguration.ReadWrite.All',
+            'DeviceManagementManagedDevices.Read.All',
+            'DeviceManagementServiceConfig.ReadWrite.All',
+            'Directory.Read.All',
+            'Policy.Read.All'
+        ) -NoWelcome
+    }
+
+    Select-MgProfile -Name 'beta'
+
+    $ctx = Get-MgContext
+    if (-not $ctx) {
+        throw "Failed to connect to Microsoft Graph."
+    }
+
+    return $ctx
 }
+
+Export-ModuleMember -Function Initialize-MDEDeployment
+
