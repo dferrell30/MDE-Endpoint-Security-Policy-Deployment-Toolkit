@@ -32,8 +32,6 @@ function Initialize-MDEDeployment {
         ) -NoWelcome
     }
 
-    Select-MgProfile -Name 'beta'
-
     $ctx = Get-MgContext
     if (-not $ctx) {
         throw "Failed to connect to Microsoft Graph."
@@ -43,4 +41,3 @@ function Initialize-MDEDeployment {
 }
 
 Export-ModuleMember -Function Initialize-MDEDeployment
-
