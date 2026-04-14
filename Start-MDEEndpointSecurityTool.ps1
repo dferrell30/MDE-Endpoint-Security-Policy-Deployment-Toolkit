@@ -96,10 +96,23 @@ function Add-ListRow {
         $Result
     )
 
+    $rowTime = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+
+    if ($null -ne $Result -and $Result.PSObject.Properties['Time']) {
+        if ($null -ne $Result.Time) {
+            try {
+                $rowTime = Get-Date -Date $Result.Time -Format 'yyyy-MM-dd HH:mm:ss'
+            }
+            catch {
+                $rowTime = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+            }
+        }
+    }
+
     $item = New-Object System.Windows.Forms.ListViewItem([string]$Result.Name)
     [void]$item.SubItems.Add([string]$Result.Status)
     [void]$item.SubItems.Add([string]$Result.Details)
-    [void]$item.SubItems.Add((Get-Date $Result.Time -Format 'yyyy-MM-dd HH:mm:ss'))
+    [void]$item.SubItems.Add([string]$rowTime)
     [void]$listView.Items.Add($item)
 }
 
