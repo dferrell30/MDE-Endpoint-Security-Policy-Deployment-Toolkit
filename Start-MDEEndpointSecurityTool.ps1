@@ -6,132 +6,175 @@ Import-Module "$PSScriptRoot\Modules\Policies.psm1" -Force
 
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "MDE Endpoint Security Deployment Tool"
-$form.Size = New-Object System.Drawing.Size(900, 620)
 $form.StartPosition = "CenterScreen"
+$form.Size = New-Object System.Drawing.Size(900, 620)
+$form.MinimumSize = New-Object System.Drawing.Size(900, 620)
 
-# Buttons
 $btnInit = New-Object System.Windows.Forms.Button
 $btnInit.Text = "Initialize"
-$btnInit.Location = "20,20"
-$btnInit.Size = "130,35"
+$btnInit.Location = New-Object System.Drawing.Point(20, 20)
+$btnInit.Size = New-Object System.Drawing.Size(130, 35)
 
-$btnDeploy = New-Object System.Windows.Forms.Button
-$btnDeploy.Text = "Create Selected Policies"
-$btnDeploy.Location = "165,20"
-$btnDeploy.Size = "180,35"
+$btnRun = New-Object System.Windows.Forms.Button
+$btnRun.Text = "Create Selected"
+$btnRun.Location = New-Object System.Drawing.Point(165, 20)
+$btnRun.Size = New-Object System.Drawing.Size(150, 35)
 
 $btnAll = New-Object System.Windows.Forms.Button
 $btnAll.Text = "Create All"
-$btnAll.Location = "360,20"
-$btnAll.Size = "130,35"
+$btnAll.Location = New-Object System.Drawing.Point(330, 20)
+$btnAll.Size = New-Object System.Drawing.Size(130, 35)
 
 $btnLogs = New-Object System.Windows.Forms.Button
-$btnLogs.Text = "Open Logs"
-$btnLogs.Location = "505,20"
-$btnLogs.Size = "130,35"
+$btnLogs.Text = "Open Logs Folder"
+$btnLogs.Location = New-Object System.Drawing.Point(475, 20)
+$btnLogs.Size = New-Object System.Drawing.Size(140, 35)
 
-# Checkboxes
 $chkAV = New-Object System.Windows.Forms.CheckBox
 $chkAV.Text = "Antivirus"
-$chkAV.Location = "20,70"
+$chkAV.Location = New-Object System.Drawing.Point(20, 75)
+$chkAV.AutoSize = $true
 $chkAV.Checked = $true
 
 $chkSec = New-Object System.Windows.Forms.CheckBox
 $chkSec.Text = "Windows Security Experience"
-$chkSec.Location = "150,70"
+$chkSec.Location = New-Object System.Drawing.Point(130, 75)
+$chkSec.AutoSize = $true
 $chkSec.Checked = $true
 
 $chkASR = New-Object System.Windows.Forms.CheckBox
 $chkASR.Text = "ASR"
-$chkASR.Location = "380,70"
+$chkASR.Location = New-Object System.Drawing.Point(355, 75)
+$chkASR.AutoSize = $true
 $chkASR.Checked = $true
 
 $chkEDR = New-Object System.Windows.Forms.CheckBox
 $chkEDR.Text = "EDR"
-$chkEDR.Location = "450,70"
+$chkEDR.Location = New-Object System.Drawing.Point(420, 75)
+$chkEDR.AutoSize = $true
 $chkEDR.Checked = $true
 
 $chkFW = New-Object System.Windows.Forms.CheckBox
 $chkFW.Text = "Firewall"
-$chkFW.Location = "520,70"
+$chkFW.Location = New-Object System.Drawing.Point(485, 75)
+$chkFW.AutoSize = $true
 $chkFW.Checked = $true
 
 $chkApp = New-Object System.Windows.Forms.CheckBox
 $chkApp.Text = "Application Control"
-$chkApp.Location = "600,70"
+$chkApp.Location = New-Object System.Drawing.Point(565, 75)
+$chkApp.AutoSize = $true
 $chkApp.Checked = $true
 
-# Status
 $lblStatus = New-Object System.Windows.Forms.Label
 $lblStatus.Text = "Ready."
-$lblStatus.Location = "20,100"
-$lblStatus.Size = "800,20"
+$lblStatus.Location = New-Object System.Drawing.Point(20, 105)
+$lblStatus.Size = New-Object System.Drawing.Size(820, 20)
 
-# ListView
 $listView = New-Object System.Windows.Forms.ListView
-$listView.Location = "20,130"
-$listView.Size = "840,330"
+$listView.Location = New-Object System.Drawing.Point(20, 135)
+$listView.Size = New-Object System.Drawing.Size(840, 360)
 $listView.View = 'Details'
 $listView.FullRowSelect = $true
 $listView.GridLines = $true
 
-$listView.Columns.Add("Policy",150)
-$listView.Columns.Add("Status",100)
-$listView.Columns.Add("Details",450)
-$listView.Columns.Add("Time",120)
+[void]$listView.Columns.Add("Policy Name", 220)
+[void]$listView.Columns.Add("Status", 100)
+[void]$listView.Columns.Add("Details", 380)
+[void]$listView.Columns.Add("Time", 140)
 
-# Summary
 $txtSummary = New-Object System.Windows.Forms.TextBox
-$txtSummary.Location = "20,470"
-$txtSummary.Size = "840,90"
+$txtSummary.Location = New-Object System.Drawing.Point(20, 510)
+$txtSummary.Size = New-Object System.Drawing.Size(840, 70)
 $txtSummary.Multiline = $true
+$txtSummary.ScrollBars = "Vertical"
 $txtSummary.ReadOnly = $true
 
-function Add-Row($name,$status,$details) {
-    $item = New-Object System.Windows.Forms.ListViewItem($name)
-    $item.SubItems.Add($status)
-    $item.SubItems.Add($details)
-    $item.SubItems.Add((Get-Date).ToString("yyyy-MM-dd HH:mm:ss"))
-    $listView.Items.Add($item) | Out-Null
+function Add-ListRow {
+    param(
+        [Parameter(Mandatory)]
+        $Result
+    )
+
+    $item = New-Object System.Windows.Forms.ListViewItem([string]$Result.Name)
+    [void]$item.SubItems.Add([string]$Result.Status)
+    [void]$item.SubItems.Add([string]$Result.Details)
+    [void]$item.SubItems.Add((Get-Date $Result.Time -Format 'yyyy-MM-dd HH:mm:ss'))
+    [void]$listView.Items.Add($item)
 }
 
-# INIT
-$btnInit.Add_Click({
-    try {
-        $lblStatus.Text = "Initializing..."
-        Invoke-MDEBootstrap
-        $lblStatus.Text = "Connected to Graph."
-    } catch {
-        [System.Windows.Forms.MessageBox]::Show($_.Exception.Message)
-    }
-})
-
-# DEPLOY SELECTED
-$btnDeploy.Add_Click({
-    $listView.Items.Clear()
-    $txtSummary.Clear()
-
+function Invoke-SelectedPolicyCreation {
     $results = @()
 
-    if ($chkAV.Checked) { $results += New-MDEAntivirusPolicy }
+    if ($chkAV.Checked)  { $results += New-MDEAntivirusPolicy }
     if ($chkSec.Checked) { $results += New-MDESecurityExperiencePolicy }
     if ($chkASR.Checked) { $results += New-MDEASRPolicy }
     if ($chkEDR.Checked) { $results += New-MDEEDRPolicy }
-    if ($chkFW.Checked) { $results += New-MDEFirewallPolicy }
-    if ($chkApp.Checked) { $results += New-MDEAppControlPolicy }
+    if ($chkFW.Checked)  { $results += New-MDEFirewallPolicy }
+    if ($chkApp.Checked) { $results += New-MDEApplicationControlPolicy }
 
-    foreach ($r in $results) {
-        Add-Row $r.Name $r.Status $r.Details
+    return $results
+}
+
+$btnInit.Add_Click({
+    try {
+        $btnInit.Enabled = $false
+        $lblStatus.Text = "Initializing..."
+        Initialize-MDEDeployment
+        $ctx = Get-MgContext
+        $lblStatus.Text = "Connected to Microsoft Graph as $($ctx.Account)"
     }
-
-    $txtSummary.Text = ($results | Group Status | ForEach-Object {
-        "$($_.Name): $($_.Count)"
-    }) -join "`n"
-
-    $lblStatus.Text = "Complete."
+    catch {
+        $lblStatus.Text = "Initialization failed."
+        [System.Windows.Forms.MessageBox]::Show($_.Exception.ToString(), "Initialization Error") | Out-Null
+    }
+    finally {
+        $btnInit.Enabled = $true
+    }
 })
 
-# CREATE ALL
+$btnLogs.Add_Click({
+    $logPath = Join-Path $PSScriptRoot 'Logs'
+    if (-not (Test-Path -LiteralPath $logPath)) {
+        New-Item -ItemType Directory -Path $logPath -Force | Out-Null
+    }
+    Start-Process explorer.exe $logPath
+})
+
+$btnRun.Add_Click({
+    try {
+        $btnRun.Enabled = $false
+        $btnAll.Enabled = $false
+        $listView.Items.Clear()
+        $txtSummary.Clear()
+        $lblStatus.Text = "Creating selected policies..."
+
+        $results = Invoke-SelectedPolicyCreation
+
+        foreach ($r in $results) {
+            Add-ListRow -Result $r
+        }
+
+        $summary = $results |
+            Group-Object Status |
+            Sort-Object Name |
+            ForEach-Object {
+                "{0}: {1}" -f $_.Name, $_.Count
+            }
+
+        $txtSummary.Text = ($summary -join [Environment]::NewLine)
+        $lblStatus.Text = "Policy creation complete."
+    }
+    catch {
+        $lblStatus.Text = "Policy creation failed."
+        [System.Windows.Forms.MessageBox]::Show($_.Exception.ToString(), "Execution Error") | Out-Null
+    }
+    finally {
+        $btnRun.Enabled = $true
+        $btnAll.Enabled = $true
+    }
+})
+
 $btnAll.Add_Click({
     $chkAV.Checked = $true
     $chkSec.Checked = $true
@@ -139,20 +182,23 @@ $btnAll.Add_Click({
     $chkEDR.Checked = $true
     $chkFW.Checked = $true
     $chkApp.Checked = $true
-    $btnDeploy.PerformClick()
-})
-
-# LOGS
-$btnLogs.Add_Click({
-    $path = "$PSScriptRoot\Logs"
-    if (!(Test-Path $path)) { New-Item -ItemType Directory $path | Out-Null }
-    explorer.exe $path
+    $btnRun.PerformClick()
 })
 
 $form.Controls.AddRange(@(
-    $btnInit,$btnDeploy,$btnAll,$btnLogs,
-    $chkAV,$chkSec,$chkASR,$chkEDR,$chkFW,$chkApp,
-    $lblStatus,$listView,$txtSummary
+    $btnInit,
+    $btnRun,
+    $btnAll,
+    $btnLogs,
+    $chkAV,
+    $chkSec,
+    $chkASR,
+    $chkEDR,
+    $chkFW,
+    $chkApp,
+    $lblStatus,
+    $listView,
+    $txtSummary
 ))
 
-$form.ShowDialog()
+[void]$form.ShowDialog()
