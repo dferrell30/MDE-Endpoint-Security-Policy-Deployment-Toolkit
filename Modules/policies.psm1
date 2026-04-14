@@ -4,7 +4,11 @@ $ErrorActionPreference = 'Stop'
 $script:PolicyPrefix = 'MDE'
 
 function New-MDEPolicyResult {
-    param($Name,$Status,$Details)
+    param(
+        [string]$Name,
+        [string]$Status,
+        [string]$Details
+    )
 
     [pscustomobject]@{
         Name    = $Name
@@ -21,7 +25,10 @@ function Assert-Mg {
 }
 
 function Invoke-CreatePolicy {
-    param($Name,$Body)
+    param(
+        [string]$Name,
+        [hashtable]$Body
+    )
 
     Assert-Mg
 
@@ -30,111 +37,81 @@ function Invoke-CreatePolicy {
     try {
         $Body.name = $displayName
 
-        $json = $Body | ConvertTo-Json -Depth 20
-
+        $json = $Body | ConvertTo-Json -Depth 25
         $uri = "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies"
 
-        $res = Invoke-MgGraphRequest -Method POST -Uri $uri -Body $json -ContentType "application/json"
+        Invoke-MgGraphRequest -Method POST -Uri $uri -Body $json -ContentType "application/json" | Out-Null
 
-        return New-MDEPolicyResult $displayName "Success" "Created"
+        return New-MDEPolicyResult -Name $displayName -Status "Success" -Details "Created"
     }
     catch {
-        return New-MDEPolicyResult $displayName "Failed" $_.Exception.Message
+        $detail = $_.Exception.Message
+
+        try {
+            if ($_.ErrorDetails -and $_.ErrorDetails.Message) {
+                $detail = $_.ErrorDetails.Message
+            }
+        }
+        catch { }
+
+        return New-MDEPolicyResult -Name $displayName -Status "Failed" -Details $detail
     }
 }
 
-# =========================
-# ANTIVIRUS (WORKING)
-# =========================
 function New-MDEAntivirusPolicy {
-
     $body = @{
-        platforms = "windows10"
-        technologies = "mdm,microsoftSense"
-        settings = @()
-    }
-
-    Invoke-CreatePolicy "Antivirus" $body
-}
-
-# =========================
-# ASR (FIXED - VALID TEMPLATE)
-# =========================
-function New-MDEASRPolicy {
-
-    $body = @{
-        description = "ASR baseline"
+        description = "Antivirus policy create attempt"
         platforms   = "windows10"
         technologies = "mdm,microsoftSense"
-
-        templateReference = @{
-            templateId = "e8c053d6-9f95-42b1-a7f1-ebfd71c67a4b_1"
-        }
-
-        settings = @()
+        settings    = @()
     }
 
-    Invoke-CreatePolicy "ASR" $body
+    Invoke-CreatePolicy -Name "Antivirus" -Body $body
 }
 
-# =========================
-# FIREWALL (FIXED)
-# =========================
-function New-MDEFirewallPolicy {
-
-    $body = @{
-        description = "Firewall baseline"
-        platforms   = "windows10"
-
-        templateReference = @{
-            templateId = "b0f1b5a3-1879-4c7a-8cfd-2f3cb0c9c0c8_1"
-        }
-
-        settings = @()
-    }
-
-    Invoke-CreatePolicy "Firewall" $body
-}
-
-# =========================
-# WINDOWS SECURITY EXPERIENCE (FIXED)
-# =========================
 function New-MDESecurityExperiencePolicy {
-
     $body = @{
-        description = "Security Experience baseline"
+        description = "Windows Security Experience policy create attempt"
         platforms   = "windows10"
         technologies = "mdm,microsoftSense"
-
-        templateReference = @{
-            templateId = "d948ff9b-99cb-4ee0-8012-1fbc09685377_1"
-        }
-
-        settings = @()
+        settings    = @()
     }
 
-    Invoke-CreatePolicy "Windows Security Experience" $body
+    Invoke-CreatePolicy -Name "Windows Security Experience" -Body $body
 }
 
-# =========================
-# APPLICATION CONTROL (SAFE FIX)
-# =========================
-function New-MDEApplicationControlPolicy {
-
+function New-MDEASRPolicy {
     $body = @{
-        description = "Application Control baseline"
+        description = "ASR policy create attempt"
+        platforms   = "windows10"
+        technologies = "mdm,microsoftSense"
+        settings    = @()
+    }
+
+    Invoke-CreatePolicy -Name "ASR" -Body $body
+}
+
+function New-MDEFirewallPolicy {
+    $body = @{
+        description = "Firewall policy create attempt"
         platforms   = "windows10"
         settings    = @()
     }
 
-    Invoke-CreatePolicy "Application Control" $body
+    Invoke-CreatePolicy -Name "Firewall" -Body $body
 }
 
-# =========================
-# EDR (KEEP AS SHELL)
-# =========================
-function New-MDEEDRPolicy {
+function New-MDEApplicationControlPolicy {
+    $body = @{
+        description = "Application Control policy create attempt"
+        platforms   = "windows10"
+        settings    = @()
+    }
 
+    Invoke-CreatePolicy -Name "Application Control" -Body $body
+}
+
+function New-MDEEDRPolicy {
     Assert-Mg
 
     try {
@@ -145,13 +122,29 @@ function New-MDEEDRPolicy {
             description = "EDR placeholder policy"
         }
 
-        Invoke-MgGraphRequest -Method POST -Uri $uri -Body ($body | ConvertTo-Json)
+        Invoke-MgGraphRequest -Method POST -Uri $uri -Body ($body | ConvertTo-Json) -ContentType "application/json" | Out-Null
 
-        return New-MDEPolicyResult "MDE - EDR" "Success" "EDR shell created"
+        return New-MDEPolicyResult -Name "MDE - EDR" -Status "Success" -Details "EDR shell created"
     }
     catch {
-        return New-MDEPolicyResult "MDE - EDR" "Failed" $_.Exception.Message
+        $detail = $_.Exception.Message
+
+        try {
+            if ($_.ErrorDetails -and $_.ErrorDetails.Message) {
+                $detail = $_.ErrorDetails.Message
+            }
+        }
+        catch { }
+
+        return New-MDEPolicyResult -Name "MDE - EDR" -Status "Failed" -Details $detail
     }
 }
 
-Export-ModuleMember -Function * 
+Export-ModuleMember -Function @(
+    'New-MDEAntivirusPolicy',
+    'New-MDESecurityExperiencePolicy',
+    'New-MDEASRPolicy',
+    'New-MDEEDRPolicy',
+    'New-MDEFirewallPolicy',
+    'New-MDEApplicationControlPolicy'
+)
