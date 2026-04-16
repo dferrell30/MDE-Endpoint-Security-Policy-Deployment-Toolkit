@@ -2,13 +2,19 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
 Import-Module "$PSScriptRoot\Modules\Bootstrapper.psm1" -Force
-Import-Module "$PSScriptRoot\Modules\Policies.psm1" -Force
+Import-Module "$PSScriptRoot\Modules\Common.psm1" -Force
+Import-Module "$PSScriptRoot\Modules\Policy.EDR.psm1" -Force
+Import-Module "$PSScriptRoot\Modules\Policy.ApplicationControl.psm1" -Force
+Import-Module "$PSScriptRoot\Modules\Policy.ASR.psm1" -Force
+Import-Module "$PSScriptRoot\Modules\Policy.Antivirus.psm1" -Force
+Import-Module "$PSScriptRoot\Modules\Policy.Firewall.psm1" -Force
+Import-Module "$PSScriptRoot\Modules\Policy.SecurityExperience.psm1" -Force
 
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "MDE Endpoint Security Deployment Tool"
 $form.StartPosition = "CenterScreen"
-$form.Size = New-Object System.Drawing.Size(900, 620)
-$form.MinimumSize = New-Object System.Drawing.Size(900, 620)
+$form.Size = New-Object System.Drawing.Size(980, 650)
+$form.MinimumSize = New-Object System.Drawing.Size(980, 650)
 
 $btnInit = New-Object System.Windows.Forms.Button
 $btnInit.Text = "Initialize"
@@ -34,58 +40,52 @@ $chkAV = New-Object System.Windows.Forms.CheckBox
 $chkAV.Text = "Antivirus"
 $chkAV.Location = New-Object System.Drawing.Point(20, 75)
 $chkAV.AutoSize = $true
-$chkAV.Checked = $true
 
 $chkSec = New-Object System.Windows.Forms.CheckBox
 $chkSec.Text = "Windows Security Experience"
 $chkSec.Location = New-Object System.Drawing.Point(130, 75)
 $chkSec.AutoSize = $true
-$chkSec.Checked = $true
 
 $chkASR = New-Object System.Windows.Forms.CheckBox
 $chkASR.Text = "ASR"
 $chkASR.Location = New-Object System.Drawing.Point(355, 75)
 $chkASR.AutoSize = $true
-$chkASR.Checked = $true
 
 $chkEDR = New-Object System.Windows.Forms.CheckBox
 $chkEDR.Text = "EDR"
 $chkEDR.Location = New-Object System.Drawing.Point(420, 75)
 $chkEDR.AutoSize = $true
-$chkEDR.Checked = $true
 
 $chkFW = New-Object System.Windows.Forms.CheckBox
 $chkFW.Text = "Firewall"
 $chkFW.Location = New-Object System.Drawing.Point(485, 75)
 $chkFW.AutoSize = $true
-$chkFW.Checked = $true
 
 $chkApp = New-Object System.Windows.Forms.CheckBox
 $chkApp.Text = "Application Control"
 $chkApp.Location = New-Object System.Drawing.Point(565, 75)
 $chkApp.AutoSize = $true
-$chkApp.Checked = $true
 
 $lblStatus = New-Object System.Windows.Forms.Label
 $lblStatus.Text = "Ready."
 $lblStatus.Location = New-Object System.Drawing.Point(20, 105)
-$lblStatus.Size = New-Object System.Drawing.Size(820, 20)
+$lblStatus.Size = New-Object System.Drawing.Size(900, 20)
 
 $listView = New-Object System.Windows.Forms.ListView
 $listView.Location = New-Object System.Drawing.Point(20, 135)
-$listView.Size = New-Object System.Drawing.Size(840, 360)
+$listView.Size = New-Object System.Drawing.Size(920, 390)
 $listView.View = 'Details'
 $listView.FullRowSelect = $true
 $listView.GridLines = $true
 
-[void]$listView.Columns.Add("Policy Name", 220)
+[void]$listView.Columns.Add("Policy Name", 240)
 [void]$listView.Columns.Add("Status", 100)
-[void]$listView.Columns.Add("Details", 380)
+[void]$listView.Columns.Add("Details", 430)
 [void]$listView.Columns.Add("Time", 140)
 
 $txtSummary = New-Object System.Windows.Forms.TextBox
-$txtSummary.Location = New-Object System.Drawing.Point(20, 510)
-$txtSummary.Size = New-Object System.Drawing.Size(840, 70)
+$txtSummary.Location = New-Object System.Drawing.Point(20, 540)
+$txtSummary.Size = New-Object System.Drawing.Size(920, 60)
 $txtSummary.Multiline = $true
 $txtSummary.ScrollBars = "Vertical"
 $txtSummary.ReadOnly = $true
@@ -109,10 +109,18 @@ function Add-ListRow {
         }
     }
 
-    $item = New-Object System.Windows.Forms.ListViewItem([string]$Result.Name)
-    [void]$item.SubItems.Add([string]$Result.Status)
-    [void]$item.SubItems.Add([string]$Result.Details)
-    [void]$item.SubItems.Add([string]$rowTime)
+    $name = ''
+    $status = ''
+    $details = ''
+
+    if ($null -ne $Result.PSObject.Properties['Name']) { $name = [string]$Result.Name }
+    if ($null -ne $Result.PSObject.Properties['Status']) { $status = [string]$Result.Status }
+    if ($null -ne $Result.PSObject.Properties['Details']) { $details = [string]$Result.Details }
+
+    $item = New-Object System.Windows.Forms.ListViewItem($name)
+    [void]$item.SubItems.Add($status)
+    [void]$item.SubItems.Add($details)
+    [void]$item.SubItems.Add($rowTime)
     [void]$listView.Items.Add($item)
 }
 
