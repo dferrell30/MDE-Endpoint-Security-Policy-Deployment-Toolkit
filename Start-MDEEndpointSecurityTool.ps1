@@ -213,8 +213,25 @@ function Log {
 function Update-ConnectionLabel {
     try {
         $ctx = Get-MgContext
+
         if ($ctx -and $ctx.Account) {
-            $lblConnection.Text = "Status: Connected as $($ctx.Account)"
+            $tenantId = $ctx.TenantId
+            $account = $ctx.Account
+
+            $tenantText = $tenantId
+            try {
+                $org = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/organization" -OutputType PSObject
+                if ($org.value -and $org.value.Count -gt 0) {
+                    if ($org.value[0].displayName) {
+                        $tenantText = "$($org.value[0].displayName) ($tenantId)"
+                    }
+                }
+            }
+            catch {
+                $tenantText = $tenantId
+            }
+
+            $lblConnection.Text = "Status: Connected to $tenantText as $account"
             $lblConnection.ForeColor = [System.Drawing.Color]::LightGreen
         }
         else {
