@@ -25,7 +25,13 @@ function Add-Log {
 }
 
 function New-DarkButton {
-    param($Text,$X,$Y,$W,$H)
+    param(
+        [string]$Text,
+        [int]$X,
+        [int]$Y,
+        [int]$W,
+        [int]$H
+    )
 
     $b = New-Object System.Windows.Forms.Button
     $b.Text = $Text
@@ -134,8 +140,18 @@ $btnDeploy = New-DarkButton "Deploy Selected" 890 360 170 36
 $btnExport = New-DarkButton "Export Existing Policy" 690 410 170 36
 $btnOpenConfig = New-DarkButton "Open Config Folder" 890 410 170 36
 $btnOpenLogs = New-DarkButton "Open Logs Folder" 690 460 170 36
+$btnValidate = New-DarkButton "Validate JSON" 890 460 170 36
+$btnDeployAll = New-DarkButton "Deploy All Valid" 890 510 170 36
 
-$form.Controls.AddRange(@($btnRefresh,$btnDeploy,$btnExport,$btnOpenConfig,$btnOpenLogs))
+$form.Controls.AddRange(@(
+    $btnRefresh,
+    $btnDeploy,
+    $btnExport,
+    $btnOpenConfig,
+    $btnOpenLogs,
+    $btnValidate,
+    $btnDeployAll
+))
 
 function Load-PolicyGrid {
     $gridPolicies.Rows.Clear()
@@ -169,6 +185,35 @@ $btnInit.Add_Click({
 
 $btnRefresh.Add_Click({
     Load-PolicyGrid
+})
+
+$btnValidate.Add_Click({
+    $gridResults.Rows.Clear()
+
+    $catalog = Get-MDEJsonPolicyCatalog
+
+    foreach ($policy in $catalog) {
+        if ($policy.Category -eq 'Editable Baseline') {
+            if (Test-Path -LiteralPath $policy.JsonPath) {
+                $result = New-MDEPolicyResult `
+                    -Name $policy.Name `
+                    -Status "Valid" `
+                    -Details "Baseline JSON exists"
+            }
+            else {
+                $result = New-MDEPolicyResult `
+                    -Name $policy.Name `
+                    -Status "Missing" `
+                    -Details "Missing baseline JSON: $($policy.JsonPath)"
+            }
+        }
+        else {
+            $result = Test-MDEJsonPolicyFile -JsonPath $policy.JsonPath
+        }
+
+        [void]$gridResults.Rows.Add($result.Name,$result.Status,$result.Details)
+        Add-Log "$($result.Name): $($result.Status) - $($result.Details)"
+    }
 })
 
 $btnDeploy.Add_Click({
@@ -213,6 +258,33 @@ $btnDeploy.Add_Click({
     }
 })
 
+$btnDeployAll.Add_Click({
+    $gridResults.Rows.Clear()
+
+    $catalog = Get-MDEJsonPolicyCatalog
+
+    foreach ($policy in $catalog) {
+        if (-not (Test-Path -LiteralPath $policy.JsonPath)) {
+            Add-Log "Skipping $($policy.Name): missing JSON"
+            continue
+        }
+
+        try {
+            Add-Log "Deploying $($policy.Name)..."
+
+            $cmd = Get-Command $policy.Function -ErrorAction Stop
+            $result = & $cmd -WhatIf:$chkWhatIf.Checked
+
+            [void]$gridResults.Rows.Add($result.Name,$result.Status,$result.Details)
+            Add-Log "$($result.Name): $($result.Status) - $($result.Details)"
+        }
+        catch {
+            [void]$gridResults.Rows.Add($policy.Name,"Failed",$_.Exception.Message)
+            Add-Log "$($policy.Name): Failed - $($_.Exception.Message)"
+        }
+    }
+})
+
 $btnExport.Add_Click({
     try {
         $policyName = [Microsoft.VisualBasic.Interaction]::InputBox(
@@ -228,7 +300,8 @@ $btnExport.Add_Click({
         $saveDialog = New-Object System.Windows.Forms.SaveFileDialog
         $saveDialog.Filter = "JSON files (*.json)|*.json"
         $saveDialog.InitialDirectory = Join-Path $PSScriptRoot "Config"
-        $saveDialog.FileName = "$($policyName -replace '[\\/:*?""<>|]', '-')`.json"
+        $safeName = $policyName -replace '[\\/:*?""<>|]', '-'
+        $saveDialog.FileName = "$safeName.json"
 
         if ($saveDialog.ShowDialog() -eq "OK") {
             $result = Export-MDEConfigPolicyJson `
@@ -247,11 +320,23 @@ $btnExport.Add_Click({
 })
 
 $btnOpenConfig.Add_Click({
-    Start-Process (Join-Path $PSScriptRoot "Config")
+    $path = Join-Path $PSScriptRoot "Config"
+
+    if (-not (Test-Path -LiteralPath $path)) {
+        New-Item -ItemType Directory -Path $path -Force | Out-Null
+    }
+
+    Start-Process $path
 })
 
 $btnOpenLogs.Add_Click({
-    Start-Process (Join-Path $PSScriptRoot "Logs")
+    $path = Join-Path $PSScriptRoot "Logs"
+
+    if (-not (Test-Path -LiteralPath $path)) {
+        New-Item -ItemType Directory -Path $path -Force | Out-Null
+    }
+
+    Start-Process $path
 })
 
 Load-PolicyGrid
