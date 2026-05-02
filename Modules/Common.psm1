@@ -3,16 +3,8 @@ $ErrorActionPreference = 'Stop'
 
 $script:PolicyPrefix = 'MDE'
 
-# Set these if you want clone-based creation for unfinished workloads
-$script:SourceAntivirusPolicyName = 'Windows Endpoint Defender Anti-Virus Policy 122025'
-$script:SourceFirewallPolicyName = ''
-
 function New-MDEPolicyResult {
-    param(
-        [string]$Name,
-        [string]$Status,
-        [string]$Details
-    )
+    param([string]$Name,[string]$Status,[string]$Details)
 
     [pscustomobject]@{
         Name    = $Name
@@ -24,295 +16,178 @@ function New-MDEPolicyResult {
 
 function Assert-Mg {
     if (-not (Get-MgContext)) {
-        throw "Not connected. Click Initialize first."
+        throw "Not connected to Microsoft Graph."
     }
 }
 
-function Get-DisplayName {
-    param(
-        [string]$Name
-    )
-
+function Get-MDEPolicyName {
+    param([string]$Name)
     "$script:PolicyPrefix - $Name"
-}
-
-function Get-MDEErrorDetail {
-    param(
-        $ErrorRecord
-    )
-
-    $detail = $ErrorRecord.Exception.Message
-
-    try {
-        if ($ErrorRecord.ErrorDetails -and $ErrorRecord.ErrorDetails.Message) {
-            $detail = $ErrorRecord.ErrorDetails.Message
-        }
-    }
-    catch { }
-
-    return $detail
 }
 
 function Write-MDELog {
     param(
-        [Parameter(Mandatory)]
         [string]$Message,
-
         [ValidateSet('INFO','WARN','ERROR')]
         [string]$Level = 'INFO'
     )
 
-    try {
-        $root = Split-Path -Path $PSScriptRoot -Parent
-        $logFolder = Join-Path $root 'Logs'
+    $root = Split-Path $PSScriptRoot -Parent
+    $logFolder = Join-Path $root 'Logs'
 
-        if (-not (Test-Path -LiteralPath $logFolder)) {
-            New-Item -ItemType Directory -Path $logFolder -Force | Out-Null
-        }
+    if (-not (Test-Path $logFolder)) {
+        New-Item -ItemType Directory -Path $logFolder -Force | Out-Null
+    }
 
-        $logPath = Join-Path $logFolder 'deployment.log'
-        $line = "[{0}] [{1}] {2}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Level, $Message
-        Add-Content -LiteralPath $logPath -Value $line
-    }
-    catch {
-        # Never throw from logging
-    }
+    $line = "[{0}] [{1}] {2}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Level, $Message
+    Add-Content -Path (Join-Path $logFolder 'deployment.log') -Value $line
 }
 
-function Test-MDEIntentExists {
-    param(
-        [Parameter(Mandatory)]
-        [string]$DisplayName
-    )
-
-    Assert-Mg
+function Get-MDEErrorDetail {
+    param($ErrorRecord)
 
     try {
-        $escapedName = $DisplayName.Replace("'", "''")
-        $uri = "https://graph.microsoft.com/beta/deviceManagement/intents?`$filter=displayName eq '$escapedName'"
-        $response = Invoke-MgGraphRequest -Method GET -Uri $uri -OutputType PSObject
-
-        if ($response.PSObject.Properties.Name -contains 'value' -and $response.value) {
-            return [bool]($response.value.Count -gt 0)
+        if ($ErrorRecord.ErrorDetails.Message) {
+            return $ErrorRecord.ErrorDetails.Message
         }
+    }
+    catch {}
 
-        return $false
+    return $ErrorRecord.Exception.Message
+}
+
+function Get-MDEJsonBody {
+    param([Parameter(Mandatory)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        throw "JSON file not found: $Path"
     }
-    catch {
-        return $false
-    }
+
+    Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+}
+
+function Set-MDEPolicyName {
+    param(
+        [Parameter(Mandatory)]$Body,
+        [Parameter(Mandatory)][string]$Name
+    )
+
+    $Body.name = Get-MDEPolicyName $Name
+    return $Body
 }
 
 function Test-MDEConfigPolicyExists {
-    param(
-        [Parameter(Mandatory)]
-        [string]$DisplayName
-    )
+    param([string]$Name)
 
     Assert-Mg
 
+    $displayName = Get-MDEPolicyName $Name
+    $escaped = $displayName.Replace("'", "''")
+    $uri = "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies?`$filter=name eq '$escaped'"
+
     try {
-        $escapedName = $DisplayName.Replace("'", "''")
-        $uri = "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies?`$filter=name eq '$escapedName'"
-        $response = Invoke-MgGraphRequest -Method GET -Uri $uri -OutputType PSObject
-
-        if ($response.PSObject.Properties.Name -contains 'value' -and $response.value) {
-            return [bool]($response.value.Count -gt 0)
-        }
-
-        return $false
+        $result = Invoke-MgGraphRequest -Method GET -Uri $uri -OutputType PSObject
+        return [bool]($result.value -and $result.value.Count -gt 0)
     }
     catch {
         return $false
     }
 }
 
-function Get-MDEConfigPolicyByName {
+function New-MDEConfigPolicyFromJson {
     param(
-        [Parameter(Mandatory)]
-        [string]$PolicyName
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$JsonPath,
+        [switch]$WhatIf
     )
 
     Assert-Mg
 
-    $escapedName = $PolicyName.Replace("'", "''")
-    $uri = "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies?`$filter=name eq '$escapedName'"
-    $response = Invoke-MgGraphRequest -Method GET -Uri $uri -OutputType PSObject
-
-    if (-not $response.value -or $response.value.Count -eq 0) {
-        return $null
-    }
-
-    return $response.value[0]
-}
-
-function Get-MDEConfigPolicySettings {
-    param(
-        [Parameter(Mandatory)]
-        [string]$PolicyId
-    )
-
-    Assert-Mg
-
-    $uri = "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/$PolicyId/settings"
-    $response = Invoke-MgGraphRequest -Method GET -Uri $uri -OutputType PSObject
-
-    if ($response.PSObject.Properties.Name -contains 'value' -and $response.value) {
-        return @($response.value)
-    }
-
-    return @()
-}
-
-function Clone-MDEConfigPolicy {
-    param(
-        [Parameter(Mandatory)]
-        [string]$SourcePolicyName,
-
-        [Parameter(Mandatory)]
-        [string]$NewShortName
-    )
-
-    Assert-Mg
-
-    $displayName = Get-DisplayName $NewShortName
-
-    if (Test-MDEConfigPolicyExists -DisplayName $displayName) {
-        return New-MDEPolicyResult -Name $displayName -Status "Skipped" -Details "Policy already exists"
-    }
+    $displayName = Get-MDEPolicyName $Name
 
     try {
-        $source = Get-MDEConfigPolicyByName -PolicyName $SourcePolicyName
-        if (-not $source) {
-            return New-MDEPolicyResult -Name $displayName -Status "Info" -Details "Source policy not found: $SourcePolicyName"
+        if (Test-MDEConfigPolicyExists -Name $Name) {
+            return New-MDEPolicyResult -Name $displayName -Status 'Skipped' -Details 'Policy already exists'
         }
 
-        $settings = Get-MDEConfigPolicySettings -PolicyId $source.id
-        if (-not $settings -or $settings.Count -eq 0) {
-            return New-MDEPolicyResult -Name $displayName -Status "Info" -Details "Source policy has no retrievable settings: $SourcePolicyName"
-        }
-
-        $body = @{
-            name            = $displayName
-            description     = "Cloned from $SourcePolicyName"
-            platforms       = $source.platforms
-            technologies    = $source.technologies
-            roleScopeTagIds = @('0')
-            settings        = $settings
-        }
-
-        if ($source.PSObject.Properties.Name -contains 'templateReference' -and $null -ne $source.templateReference) {
-            $body.templateReference = $source.templateReference
-        }
-
+        $body = Get-MDEJsonBody -Path $JsonPath
+        $body = Set-MDEPolicyName -Body $body -Name $Name
         $json = $body | ConvertTo-Json -Depth 100 -Compress
 
-        Write-MDELog -Message "Cloning config policy [$displayName] from [$SourcePolicyName]"
-        Invoke-MgGraphRequest -Method POST `
-            -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies" `
-            -Body $json `
-            -ContentType "application/json" | Out-Null
+        Write-MDELog -Message "Prepared policy [$displayName] from [$JsonPath]"
+        Write-MDELog -Message "Request JSON [$displayName]: $json"
 
-        return New-MDEPolicyResult -Name $displayName -Status "Success" -Details "Cloned from $SourcePolicyName"
-    }
-    catch {
-        $detail = Get-MDEErrorDetail $_
-        Write-MDELog -Level 'ERROR' -Message "Failed cloning config policy [$displayName]: $detail"
-        return New-MDEPolicyResult -Name $displayName -Status "Failed" -Details $detail
-    }
-}
-
-function Invoke-CreateConfigPolicy {
-    param(
-        [Parameter(Mandatory)]
-        [string]$Name,
-
-        [Parameter(Mandatory)]
-        [hashtable]$Body
-    )
-
-    Assert-Mg
-
-    $displayName = Get-DisplayName $Name
-
-    if (Test-MDEConfigPolicyExists -DisplayName $displayName) {
-        return New-MDEPolicyResult -Name $displayName -Status "Skipped" -Details "Policy already exists"
-    }
-
-    try {
-        $Body.name = $displayName
-        $json = $Body | ConvertTo-Json -Depth 100 -Compress
-
-        Write-MDELog -Message "Creating config policy [$displayName]"
-        Invoke-MgGraphRequest -Method POST `
-            -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies" `
-            -Body $json `
-            -ContentType "application/json" | Out-Null
-
-        return New-MDEPolicyResult -Name $displayName -Status "Success" -Details "Created configuration policy"
-    }
-    catch {
-        $detail = Get-MDEErrorDetail $_
-        Write-MDELog -Level 'ERROR' -Message "Failed creating config policy [$displayName]: $detail"
-        return New-MDEPolicyResult -Name $displayName -Status "Failed" -Details $detail
-    }
-}
-
-function Invoke-CreateTemplatePolicy {
-    param(
-        [Parameter(Mandatory)]
-        [string]$Name,
-
-        [Parameter(Mandatory)]
-        [string]$TemplateId
-    )
-
-    Assert-Mg
-
-    $displayName = Get-DisplayName $Name
-
-    if (Test-MDEIntentExists -DisplayName $displayName) {
-        return New-MDEPolicyResult -Name $displayName -Status "Skipped" -Details "Policy already exists"
-    }
-
-    try {
-        $body = @{
-            displayName = $displayName
-            description = "$Name policy created via tool"
-        } | ConvertTo-Json -Depth 5 -Compress
-
-        Write-MDELog -Message "Creating template policy [$displayName] using template [$TemplateId]"
-
-        $response = Invoke-MgGraphRequest -Method POST `
-            -Uri "https://graph.microsoft.com/beta/deviceManagement/templates/$TemplateId/createInstance" `
-            -Body $body `
-            -ContentType "application/json" `
-            -OutputType PSObject
-
-        if ($response -and $response.id) {
-            return New-MDEPolicyResult -Name $displayName -Status "Success" -Details "Created intent id $($response.id)"
+        if ($WhatIf) {
+            return New-MDEPolicyResult -Name $displayName -Status 'WhatIf' -Details "Validated JSON only: $JsonPath"
         }
 
-        return New-MDEPolicyResult -Name $displayName -Status "Warning" -Details "Create call returned without an intent id"
+        Invoke-MgGraphRequest `
+            -Method POST `
+            -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies" `
+            -Body $json `
+            -ContentType 'application/json' | Out-Null
+
+        return New-MDEPolicyResult -Name $displayName -Status 'Success' -Details 'Created configuration policy'
     }
     catch {
         $detail = Get-MDEErrorDetail $_
-        Write-MDELog -Level 'ERROR' -Message "Failed creating template policy [$displayName]: $detail"
-        return New-MDEPolicyResult -Name $displayName -Status "Failed" -Details $detail
+        Write-MDELog -Level ERROR -Message "Failed [$displayName]: $detail"
+        return New-MDEPolicyResult -Name $displayName -Status 'Failed' -Details $detail
     }
+}
+
+function Export-MDEConfigPolicyJson {
+    param(
+        [Parameter(Mandatory)][string]$PolicyName,
+        [Parameter(Mandatory)][string]$OutputPath
+    )
+
+    Assert-Mg
+
+    $escaped = $PolicyName.Replace("'", "''")
+    $uri = "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies?`$filter=name eq '$escaped'"
+    $policy = Invoke-MgGraphRequest -Method GET -Uri $uri -OutputType PSObject
+
+    if (-not $policy.value -or $policy.value.Count -eq 0) {
+        throw "Policy not found: $PolicyName"
+    }
+
+    $p = $policy.value[0]
+    $settingsUri = "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/$($p.id)/settings"
+    $settings = Invoke-MgGraphRequest -Method GET -Uri $settingsUri -OutputType PSObject
+
+    $body = [ordered]@{
+        name            = $p.name
+        description     = $p.description
+        platforms       = $p.platforms
+        technologies    = $p.technologies
+        roleScopeTagIds = @($p.roleScopeTagIds)
+        settings        = @($settings.value)
+    }
+
+    if ($p.templateReference) {
+        $body.templateReference = $p.templateReference
+    }
+
+    $folder = Split-Path $OutputPath -Parent
+    if ($folder -and -not (Test-Path $folder)) {
+        New-Item -ItemType Directory -Path $folder -Force | Out-Null
+    }
+
+    $body | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $OutputPath -Encoding UTF8
+
+    return New-MDEPolicyResult -Name $PolicyName -Status 'Success' -Details "Exported to $OutputPath"
 }
 
 Export-ModuleMember -Function @(
     'New-MDEPolicyResult',
     'Assert-Mg',
-    'Get-DisplayName',
-    'Get-MDEErrorDetail',
+    'Get-MDEPolicyName',
     'Write-MDELog',
-    'Test-MDEIntentExists',
+    'Get-MDEErrorDetail',
+    'Get-MDEJsonBody',
+    'Set-MDEPolicyName',
     'Test-MDEConfigPolicyExists',
-    'Get-MDEConfigPolicyByName',
-    'Get-MDEConfigPolicySettings',
-    'Clone-MDEConfigPolicy',
-    'Invoke-CreateConfigPolicy',
-    'Invoke-CreateTemplatePolicy'
+    'New-MDEConfigPolicyFromJson',
+    'Export-MDEConfigPolicyJson'
 )
