@@ -1,4 +1,44 @@
 Import-Module "$PSScriptRoot\Common.psm1" -Force -DisableNameChecking
+Import-Module "$PSScriptRoot\Baseline.Engine.psm1" -Force -DisableNameChecking
+
+# ==============================
+# Editable baseline mappings
+# ==============================
+
+$script:AntivirusMap = @{
+    cloudProtection = @{
+        Type = 'BooleanChoice'
+        SettingDefinitionId = 'device_vendor_msft_policy_config_defender_allowcloudprotection'
+    }
+
+    realTimeMonitoring = @{
+        Type = 'BooleanChoice'
+        SettingDefinitionId = 'device_vendor_msft_policy_config_defender_allowrealtimemonitoring'
+    }
+
+    puaProtection = @{
+        Type = 'BooleanChoice'
+        SettingDefinitionId = 'device_vendor_msft_policy_config_defender_puaprotection'
+    }
+
+    avgCpuLoadFactor = @{
+        Type = 'Integer'
+        SettingDefinitionId = 'device_vendor_msft_policy_config_defender_avgcpuloadfactor'
+    }
+
+    cloudBlockLevel = @{
+        Type = 'Choice'
+        SettingDefinitionId = 'device_vendor_msft_policy_config_defender_cloudblocklevel'
+        Values = @{
+            default = 'device_vendor_msft_policy_config_defender_cloudblocklevel_0'
+            high    = 'device_vendor_msft_policy_config_defender_cloudblocklevel_2'
+        }
+    }
+}
+
+# ==============================
+# Generic raw JSON deployment
+# ==============================
 
 function New-MDEJsonPolicy {
     param(
@@ -16,6 +56,27 @@ function New-MDEJsonPolicy {
         -JsonPath $JsonPath `
         -WhatIf:$WhatIf
 }
+
+# ==============================
+# Editable baseline policies
+# ==============================
+
+function New-MDEAntivirusBaselinePolicy {
+    param([switch]$WhatIf)
+
+    $root = Split-Path $PSScriptRoot -Parent
+
+    New-MDEPolicyFromBaseline `
+        -Name 'Antivirus Baseline' `
+        -BaselinePath (Join-Path $root 'Config\Baselines\antivirus.baseline.json') `
+        -TemplatePath (Join-Path $root 'Config\Templates\antivirus.template.json') `
+        -Map $script:AntivirusMap `
+        -WhatIf:$WhatIf
+}
+
+# ==============================
+# Raw JSON policies
+# ==============================
 
 function New-MDEAntivirusSettingsCatalogPolicy {
     param([switch]$WhatIf)
@@ -80,69 +141,80 @@ function New-MDEApplicationControlPolicy {
     New-MDEJsonPolicy -Name 'Application Control' -JsonPath $path -WhatIf:$WhatIf
 }
 
+# ==============================
+# UI catalog
+# ==============================
+
 function Get-MDEJsonPolicyCatalog {
     $root = Split-Path $PSScriptRoot -Parent
 
     @(
         [pscustomobject]@{
+            Name        = 'Antivirus Baseline'
+            Category    = 'Editable Baseline'
+            JsonPath    = Join-Path $root 'Config\Baselines\antivirus.baseline.json'
+            Function    = 'New-MDEAntivirusBaselinePolicy'
+        }
+
+        [pscustomobject]@{
             Name        = 'Antivirus'
-            Category    = 'Settings Catalog'
+            Category    = 'Settings Catalog Raw JSON'
             JsonPath    = Join-Path $root 'Config\SettingsCatalog\antivirus.json'
             Function    = 'New-MDEAntivirusSettingsCatalogPolicy'
         }
 
         [pscustomobject]@{
             Name        = 'Antivirus Endpoint Security'
-            Category    = 'Endpoint Security'
+            Category    = 'Endpoint Security Raw JSON'
             JsonPath    = Join-Path $root 'Config\EndpointSecurity\antivirus.json'
             Function    = 'New-MDEAntivirusEndpointSecurityPolicy'
         }
 
         [pscustomobject]@{
             Name        = 'Firewall'
-            Category    = 'Endpoint Security'
+            Category    = 'Endpoint Security Raw JSON'
             JsonPath    = Join-Path $root 'Config\EndpointSecurity\firewall.json'
             Function    = 'New-MDEFirewallPolicy'
         }
 
         [pscustomobject]@{
             Name        = 'ASR'
-            Category    = 'Endpoint Security'
+            Category    = 'Endpoint Security Raw JSON'
             JsonPath    = Join-Path $root 'Config\EndpointSecurity\asr.json'
             Function    = 'New-MDEASRPolicy'
         }
 
         [pscustomobject]@{
             Name        = 'EDR'
-            Category    = 'Endpoint Security'
+            Category    = 'Endpoint Security Raw JSON'
             JsonPath    = Join-Path $root 'Config\EndpointSecurity\edr.json'
             Function    = 'New-MDEEDRPolicy'
         }
 
         [pscustomobject]@{
             Name        = 'Web Protection'
-            Category    = 'Endpoint Security'
+            Category    = 'Endpoint Security Raw JSON'
             JsonPath    = Join-Path $root 'Config\EndpointSecurity\webprotection.json'
             Function    = 'New-MDEWebProtectionPolicy'
         }
 
         [pscustomobject]@{
             Name        = 'Windows Security Experience'
-            Category    = 'Endpoint Security'
+            Category    = 'Endpoint Security Raw JSON'
             JsonPath    = Join-Path $root 'Config\EndpointSecurity\windows-security-experience.json'
             Function    = 'New-MDEWindowsSecurityExperiencePolicy'
         }
 
         [pscustomobject]@{
             Name        = 'AVC Update Controls'
-            Category    = 'Endpoint Security'
+            Category    = 'Endpoint Security Raw JSON'
             JsonPath    = Join-Path $root 'Config\EndpointSecurity\avc-update-controls.json'
             Function    = 'New-MDEAVCUpdateControlsPolicy'
         }
 
         [pscustomobject]@{
             Name        = 'Application Control'
-            Category    = 'Endpoint Security'
+            Category    = 'Endpoint Security Raw JSON'
             JsonPath    = Join-Path $root 'Config\EndpointSecurity\application-control.json'
             Function    = 'New-MDEApplicationControlPolicy'
         }
@@ -151,6 +223,7 @@ function Get-MDEJsonPolicyCatalog {
 
 Export-ModuleMember -Function @(
     'New-MDEJsonPolicy',
+    'New-MDEAntivirusBaselinePolicy',
     'New-MDEAntivirusSettingsCatalogPolicy',
     'New-MDEAntivirusEndpointSecurityPolicy',
     'New-MDEFirewallPolicy',
