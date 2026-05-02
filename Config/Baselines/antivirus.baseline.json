@@ -1,0 +1,11 @@
+{
+  "name": "Antivirus",
+  "description": "MDE Antivirus Phase 1 Baseline",
+  "settings": {
+    "cloudProtection": true,
+    "realTimeMonitoring": true,
+    "puaProtection": true,
+    "avgCpuLoadFactor": 50,
+    "cloudBlockLevel": "high"
+  }
+}
