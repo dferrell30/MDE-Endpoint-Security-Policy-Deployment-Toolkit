@@ -2,6 +2,7 @@
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
+Add-Type -AssemblyName Microsoft.VisualBasic
 
 Import-Module "$PSScriptRoot\Modules\Common.psm1" -Force -DisableNameChecking
 Import-Module "$PSScriptRoot\Modules\Policy.Json.psm1" -Force -DisableNameChecking
