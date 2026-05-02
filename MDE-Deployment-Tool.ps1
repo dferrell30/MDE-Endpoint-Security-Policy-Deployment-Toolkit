@@ -73,7 +73,7 @@ function Add-Result {
 
     $rowIndex = $gridResults.Rows.Add($Name,$Status,$Details)
     Set-ResultRowColor -Row $gridResults.Rows[$rowIndex] -Status $Status
-    Add-Log "$Name: $Status - $Details"
+    Add-Log "${Name}: $Status - $Details"
 }
 
 function Invoke-PolicyDeployFromCatalogItem {
