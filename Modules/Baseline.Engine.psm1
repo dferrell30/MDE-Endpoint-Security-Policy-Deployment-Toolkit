@@ -1,10 +1,10 @@
-Import-Module "$PSScriptRoot\Common.psm1" -Force -DisableNameChecking
+# Modules\Baseline.Engine.psm1
+
+$commonPath = Join-Path $PSScriptRoot 'Common.psm1'
+. $commonPath
 
 function Get-MDEBaselineJson {
-    param(
-        [Parameter(Mandatory)]
-        [string]$Path
-    )
+    param([Parameter(Mandatory)][string]$Path)
 
     if (-not (Test-Path -LiteralPath $Path)) {
         throw "Baseline JSON not found: $Path"
@@ -14,10 +14,7 @@ function Get-MDEBaselineJson {
 }
 
 function Get-MDETemplateJson {
-    param(
-        [Parameter(Mandatory)]
-        [string]$Path
-    )
+    param([Parameter(Mandatory)][string]$Path)
 
     if (-not (Test-Path -LiteralPath $Path)) {
         throw "Template JSON not found: $Path"
@@ -28,14 +25,9 @@ function Get-MDETemplateJson {
 
 function Set-MDETemplateSettingValue {
     param(
-        [Parameter(Mandatory)]
-        $Template,
-
-        [Parameter(Mandatory)]
-        [string]$SettingDefinitionId,
-
-        [Parameter(Mandatory)]
-        $Value
+        [Parameter(Mandatory)]$Template,
+        [Parameter(Mandatory)][string]$SettingDefinitionId,
+        [Parameter(Mandatory)]$Value
     )
 
     foreach ($setting in $Template.settings) {
@@ -49,6 +41,11 @@ function Set-MDETemplateSettingValue {
             continue
         }
 
+        if ($instance.PSObject.Properties.Name -contains 'simpleSettingValue') {
+            $instance.simpleSettingValue.value = $Value
+            return $true
+        }
+
         if ($instance.PSObject.Properties.Name -contains 'choiceSettingValue') {
             $instance.choiceSettingValue.value = $Value
 
@@ -58,46 +55,17 @@ function Set-MDETemplateSettingValue {
 
             return $true
         }
-
-        if ($instance.PSObject.Properties.Name -contains 'simpleSettingValue') {
-            $instance.simpleSettingValue.value = $Value
-            return $true
-        }
     }
 
     return $false
 }
 
-function Convert-MDEBooleanToChoiceValue {
-    param(
-        [Parameter(Mandatory)]
-        [bool]$Value,
-
-        [Parameter(Mandatory)]
-        [string]$SettingDefinitionId
-    )
-
-    if ($Value) {
-        return "$($SettingDefinitionId)_1"
-    }
-
-    return "$($SettingDefinitionId)_0"
-}
-
 function New-MDEPolicyFromBaseline {
     param(
-        [Parameter(Mandatory)]
-        [string]$Name,
-
-        [Parameter(Mandatory)]
-        [string]$BaselinePath,
-
-        [Parameter(Mandatory)]
-        [string]$TemplatePath,
-
-        [Parameter(Mandatory)]
-        [hashtable]$Map,
-
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$BaselinePath,
+        [Parameter(Mandatory)][string]$TemplatePath,
+        [Parameter(Mandatory)][hashtable]$Map,
         [switch]$WhatIf
     )
 
@@ -106,18 +74,14 @@ function New-MDEPolicyFromBaseline {
         $template = Get-MDETemplateJson -Path $TemplatePath
 
         if ($baseline.PSObject.Properties.Name -contains 'name' -and -not [string]::IsNullOrWhiteSpace($baseline.name)) {
-            $template.name = Get-MDEPolicyName $baseline.name
+            $template.name = Get-MDEPolicyName -Name $baseline.name
         }
         else {
-            $template.name = Get-MDEPolicyName $Name
+            $template.name = Get-MDEPolicyName -Name $Name
         }
 
         if ($baseline.PSObject.Properties.Name -contains 'description' -and -not [string]::IsNullOrWhiteSpace($baseline.description)) {
             $template.description = $baseline.description
-        }
-
-        if (-not ($baseline.PSObject.Properties.Name -contains 'settings')) {
-            throw "Baseline JSON is missing the settings object."
         }
 
         foreach ($friendlyName in $baseline.settings.PSObject.Properties.Name) {
@@ -131,31 +95,9 @@ function New-MDEPolicyFromBaseline {
             $rawValue = $baseline.settings.$friendlyName
 
             switch ($mapping.Type) {
-                'BooleanChoice' {
-                    $graphValue = Convert-MDEBooleanToChoiceValue `
-                        -Value ([bool]$rawValue) `
-                        -SettingDefinitionId $settingDefinitionId
-                }
-
-                'Choice' {
-                    if (-not $mapping.Values.ContainsKey($rawValue)) {
-                        throw "Invalid value [$rawValue] for [$friendlyName]."
-                    }
-
-                    $graphValue = $mapping.Values[$rawValue]
-                }
-
-                'Integer' {
-                    $graphValue = [int]$rawValue
-                }
-
-                'String' {
-                    $graphValue = [string]$rawValue
-                }
-
-                default {
-                    throw "Unsupported mapping type: $($mapping.Type)"
-                }
+                'Integer' { $graphValue = [int]$rawValue }
+                'String'  { $graphValue = [string]$rawValue }
+                default   { $graphValue = $rawValue }
             }
 
             $updated = Set-MDETemplateSettingValue `
@@ -173,7 +115,7 @@ function New-MDEPolicyFromBaseline {
             New-Item -ItemType Directory -Path $tempFolder -Force | Out-Null
         }
 
-        $tempPath = Join-Path $tempFolder "$($Name)-payload.json"
+        $tempPath = Join-Path $tempFolder "$Name-payload.json"
         $template | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $tempPath -Encoding UTF8
 
         return New-MDEConfigPolicyFromJson `
@@ -188,11 +130,3 @@ function New-MDEPolicyFromBaseline {
             -Details $_.Exception.Message
     }
 }
-
-Export-ModuleMember -Function @(
-    'Get-MDEBaselineJson',
-    'Get-MDETemplateJson',
-    'Set-MDETemplateSettingValue',
-    'Convert-MDEBooleanToChoiceValue',
-    'New-MDEPolicyFromBaseline'
-)
