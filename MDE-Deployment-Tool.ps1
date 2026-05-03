@@ -8,6 +8,60 @@ Import-Module (Join-Path $PSScriptRoot 'Modules\Common.psm1') -Force -DisableNam
 Import-Module (Join-Path $PSScriptRoot 'Modules\Policy.Json.psm1') -Force -DisableNameChecking -Global
 Import-Module (Join-Path $PSScriptRoot 'Modules\Assignments.psm1') -Force -DisableNameChecking -Global
 
+function Test-MDEJsonPolicyFile {
+    param(
+        [Parameter(Mandatory)]
+        [string]$JsonPath
+    )
+
+    $name = Split-Path -Path $JsonPath -Leaf
+
+    if (-not (Test-Path -LiteralPath $JsonPath)) {
+        return New-MDEPolicyResult `
+            -Name $name `
+            -Status "Missing" `
+            -Details "JSON file not found: $JsonPath"
+    }
+
+    try {
+        $raw = Get-Content -LiteralPath $JsonPath -Raw
+
+        if ([string]::IsNullOrWhiteSpace($raw)) {
+            return New-MDEPolicyResult `
+                -Name $name `
+                -Status "Invalid" `
+                -Details "JSON file is empty"
+        }
+
+        $json = $raw | ConvertFrom-Json
+
+        if (-not ($json.PSObject.Properties.Name -contains 'settings')) {
+            return New-MDEPolicyResult `
+                -Name $name `
+                -Status "Invalid" `
+                -Details "Missing settings array"
+        }
+
+        if (-not $json.settings -or $json.settings.Count -lt 1) {
+            return New-MDEPolicyResult `
+                -Name $name `
+                -Status "Invalid" `
+                -Details "Settings array is empty"
+        }
+
+        return New-MDEPolicyResult `
+            -Name $name `
+            -Status "Valid" `
+            -Details "JSON passed basic validation"
+    }
+    catch {
+        return New-MDEPolicyResult `
+            -Name $name `
+            -Status "Invalid" `
+            -Details $_.Exception.Message
+    }
+}
+
 $script:Theme = @{
     Back      = [System.Drawing.Color]::FromArgb(18,18,24)
     Panel     = [System.Drawing.Color]::FromArgb(30,30,38)
