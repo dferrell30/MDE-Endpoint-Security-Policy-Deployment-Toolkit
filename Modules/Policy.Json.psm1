@@ -1,5 +1,13 @@
-Import-Module (Join-Path $PSScriptRoot 'Common.psm1') -Force -DisableNameChecking -Global
-Import-Module (Join-Path $PSScriptRoot 'Baseline.Engine.psm1') -Force -DisableNameChecking -Global
+# Modules\Policy.Json.psm1
+
+$commonPath = Join-Path $PSScriptRoot 'Common.psm1'
+$baselinePath = Join-Path $PSScriptRoot 'Baseline.Engine.psm1'
+
+. $commonPath
+
+if (Test-Path -LiteralPath $baselinePath) {
+    . $baselinePath
+}
 
 $script:AntivirusMap = @{
     cloudProtection = @{
@@ -149,15 +157,3 @@ function Get-MDEJsonPolicyCatalog {
         }
     )
 }
-
-Export-ModuleMember -Function @(
-    'New-MDEJsonPolicy',
-    'New-MDEAntivirusBaselinePolicy',
-    'New-MDEAntivirusSettingsCatalogPolicy',
-    'New-MDEFirewallPolicy',
-    'New-MDEASRPolicy',
-    'New-MDEEDRPolicy',
-    'New-MDEWindowsSecurityExperiencePolicy',
-    'New-MDEAVCUpdateControlsPolicy',
-    'Get-MDEJsonPolicyCatalog'
-)
