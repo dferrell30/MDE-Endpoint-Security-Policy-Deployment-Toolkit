@@ -4,9 +4,9 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 Add-Type -AssemblyName Microsoft.VisualBasic
 
-Import-Module "$PSScriptRoot\Modules\Common.psm1" -Force -DisableNameChecking
-Import-Module "$PSScriptRoot\Modules\Policy.Json.psm1" -Force -DisableNameChecking
-Import-Module "$PSScriptRoot\Modules\Assignments.psm1" -Force -DisableNameChecking
+Import-Module (Join-Path $PSScriptRoot 'Modules\Common.psm1') -Force -DisableNameChecking -Global
+Import-Module (Join-Path $PSScriptRoot 'Modules\Policy.Json.psm1') -Force -DisableNameChecking -Global
+Import-Module (Join-Path $PSScriptRoot 'Modules\Assignments.psm1') -Force -DisableNameChecking -Global
 
 $script:Theme = @{
     Back      = [System.Drawing.Color]::FromArgb(18,18,24)
@@ -25,13 +25,7 @@ function Add-Log {
 }
 
 function New-DarkButton {
-    param(
-        [string]$Text,
-        [int]$X,
-        [int]$Y,
-        [int]$W,
-        [int]$H
-    )
+    param([string]$Text,[int]$X,[int]$Y,[int]$W,[int]$H)
 
     $b = New-Object System.Windows.Forms.Button
     $b.Text = $Text
@@ -45,10 +39,7 @@ function New-DarkButton {
 }
 
 function Set-ResultRowColor {
-    param(
-        [System.Windows.Forms.DataGridViewRow]$Row,
-        [string]$Status
-    )
+    param([System.Windows.Forms.DataGridViewRow]$Row,[string]$Status)
 
     switch ($Status) {
         "Success"  { $Row.DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(22,101,52) }
@@ -65,11 +56,7 @@ function Set-ResultRowColor {
 }
 
 function Add-Result {
-    param(
-        [string]$Name,
-        [string]$Status,
-        [string]$Details
-    )
+    param([string]$Name,[string]$Status,[string]$Details)
 
     $rowIndex = $gridResults.Rows.Add($Name,$Status,$Details)
     Set-ResultRowColor -Row $gridResults.Rows[$rowIndex] -Status $Status
@@ -77,23 +64,17 @@ function Add-Result {
 }
 
 function Invoke-PolicyDeployFromCatalogItem {
-    param(
-        [Parameter(Mandatory)]
-        $Policy
-    )
+    param([Parameter(Mandatory)]$Policy)
 
     if (-not (Test-Path -LiteralPath $Policy.JsonPath)) {
-        return New-MDEPolicyResult `
-            -Name $Policy.Name `
-            -Status "Skipped" `
-            -Details "Missing JSON file: $($Policy.JsonPath)"
+        return New-MDEPolicyResult -Name $Policy.Name -Status "Skipped" -Details "Missing JSON file: $($Policy.JsonPath)"
     }
 
     $cmd = Get-Command $Policy.Function -ErrorAction Stop
     $result = & $cmd -WhatIf:$chkWhatIf.Checked
 
     if ($chkAssignAfterDeploy.Checked -and -not $chkWhatIf.Checked) {
-        if ($result.Status -eq "Success" -or $result.Status -eq "Skipped") {
+        if ($result.Status -in @("Success","Skipped")) {
             $assignResult = Add-MDEAssignmentFromConfig -PolicyFriendlyName $Policy.Name
             Add-Result -Name $assignResult.Name -Status $assignResult.Status -Details $assignResult.Details
         }
@@ -119,7 +100,7 @@ $title.ForeColor = $script:Theme.Text
 $form.Controls.Add($title)
 
 $subtitle = New-Object System.Windows.Forms.Label
-$subtitle.Text = "JSON-driven Endpoint Security and Settings Catalog policy deployment"
+$subtitle.Text = "JSON-driven Settings Catalog policy deployment"
 $subtitle.Location = New-Object System.Drawing.Point(22,48)
 $subtitle.Size = New-Object System.Drawing.Size(650,24)
 $subtitle.ForeColor = $script:Theme.Muted
@@ -161,12 +142,10 @@ $gridPolicies.AllowUserToAddRows = $false
 $gridPolicies.SelectionMode = 'FullRowSelect'
 $gridPolicies.MultiSelect = $true
 $gridPolicies.AutoSizeColumnsMode = 'Fill'
-
 [void]$gridPolicies.Columns.Add("Name","Policy")
 [void]$gridPolicies.Columns.Add("Category","Category")
 [void]$gridPolicies.Columns.Add("JsonPath","JSON Path")
 [void]$gridPolicies.Columns.Add("Exists","JSON Exists")
-
 $form.Controls.Add($gridPolicies)
 
 $gridResults = New-Object System.Windows.Forms.DataGridView
@@ -184,11 +163,9 @@ $gridResults.EnableHeadersVisualStyles = $false
 $gridResults.RowHeadersVisible = $false
 $gridResults.AllowUserToAddRows = $false
 $gridResults.AutoSizeColumnsMode = 'Fill'
-
 [void]$gridResults.Columns.Add("Name","Name")
 [void]$gridResults.Columns.Add("Status","Status")
 [void]$gridResults.Columns.Add("Details","Details")
-
 $form.Controls.Add($gridResults)
 
 $txtLog = New-Object System.Windows.Forms.TextBox
@@ -221,7 +198,6 @@ $form.Controls.AddRange(@(
 
 function Load-PolicyGrid {
     $gridPolicies.Rows.Clear()
-
     $catalog = Get-MDEJsonPolicyCatalog
 
     foreach ($p in $catalog) {
@@ -256,7 +232,6 @@ $btnRefresh.Add_Click({
 
 $btnValidate.Add_Click({
     $gridResults.Rows.Clear()
-
     $catalog = Get-MDEJsonPolicyCatalog
 
     foreach ($policy in $catalog) {
@@ -306,7 +281,6 @@ $btnDeploy.Add_Click({
 
 $btnDeployAll.Add_Click({
     $gridResults.Rows.Clear()
-
     $catalog = Get-MDEJsonPolicyCatalog
 
     foreach ($policy in $catalog) {
@@ -328,24 +302,36 @@ $btnDeployAll.Add_Click({
 
 $btnExport.Add_Click({
     try {
+        Add-Log "Reloading Common module before export..."
+
+        Import-Module (Join-Path $PSScriptRoot 'Modules\Common.psm1') `
+            -Force `
+            -DisableNameChecking `
+            -Global
+
+        $exportCmd = Get-Command Export-MDEConfigPolicyJson -ErrorAction Stop
+        Add-Log "Found export command: $($exportCmd.Name) from $($exportCmd.Source)"
+
         $policyName = [Microsoft.VisualBasic.Interaction]::InputBox(
-            "Enter the exact existing Intune policy name to export:",
+            "Enter the exact existing Intune Settings Catalog policy name to export:",
             "Export Policy JSON",
             ""
         )
 
         if ([string]::IsNullOrWhiteSpace($policyName)) {
+            Add-Log "Export cancelled."
             return
         }
 
         $saveDialog = New-Object System.Windows.Forms.SaveFileDialog
         $saveDialog.Filter = "JSON files (*.json)|*.json"
-        $saveDialog.InitialDirectory = Join-Path $PSScriptRoot "Config"
-        $safeName = $policyName -replace '[\\/:*?""<>|]', '-'
-        $saveDialog.FileName = "$safeName.json"
+        $saveDialog.InitialDirectory = Join-Path $PSScriptRoot "Config\SettingsCatalog"
+        $saveDialog.FileName = "firewall.json"
 
         if ($saveDialog.ShowDialog() -eq "OK") {
-            $result = Export-MDEConfigPolicyJson `
+            Add-Log "Exporting [$policyName] to [$($saveDialog.FileName)]"
+
+            $result = & $exportCmd `
                 -PolicyName $policyName `
                 -OutputPath $saveDialog.FileName
 
@@ -354,7 +340,12 @@ $btnExport.Add_Click({
         }
     }
     catch {
-        Add-Log "Export failed: $($_.Exception.Message)"
+        Add-Result -Name "Export" -Status "Failed" -Details $_.Exception.Message
+        Add-Log "Loaded modules:"
+        Get-Module | ForEach-Object {
+            Add-Log " - $($_.Name): $($_.Path)"
+        }
+
         [System.Windows.Forms.MessageBox]::Show($_.Exception.Message,"Export Failed")
     }
 })
@@ -380,5 +371,4 @@ $btnOpenLogs.Add_Click({
 })
 
 Load-PolicyGrid
-
 [void]$form.ShowDialog()
