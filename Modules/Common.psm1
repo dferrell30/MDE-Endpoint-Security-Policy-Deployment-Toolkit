@@ -26,7 +26,6 @@ function Assert-Mg {
 
 function Get-MDEPolicyName {
     param([Parameter(Mandatory)][string]$Name)
-
     "$script:PolicyPrefix - $Name"
 }
 
@@ -201,9 +200,7 @@ function Export-MDEConfigPolicyJson {
         }
 
         $policyObject = $policy.value[0]
-        $policyId = $policyObject.id
-
-        $settingsUri = "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/$policyId/settings"
+        $settingsUri = "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/$($policyObject.id)/settings"
         $settings = Invoke-MgGraphRequest -Method GET -Uri $settingsUri -OutputType PSObject
 
         if (-not $settings.value -or $settings.value.Count -eq 0) {
@@ -231,7 +228,6 @@ function Export-MDEConfigPolicyJson {
         $body | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $OutputPath -Encoding UTF8
 
         Write-MDELog -Message "Exported policy [$PolicyName] to [$OutputPath]"
-
         return New-MDEPolicyResult -Name $PolicyName -Status "Success" -Details "Exported to $OutputPath"
     }
     catch {
