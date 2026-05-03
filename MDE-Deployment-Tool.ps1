@@ -4,24 +4,15 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 Add-Type -AssemblyName Microsoft.VisualBasic
 
-Remove-Module Common -Force -ErrorAction SilentlyContinue
-Remove-Module Policy.Json -Force -ErrorAction SilentlyContinue
-Remove-Module Assignments -Force -ErrorAction SilentlyContinue
-Remove-Module Baseline.Engine -Force -ErrorAction SilentlyContinue
+$commonPath = Join-Path $PSScriptRoot 'Modules\Common.psm1'
+$policyPath = Join-Path $PSScriptRoot 'Modules\Policy.Json.psm1'
+$assignmentsPath = Join-Path $PSScriptRoot 'Modules\Assignments.psm1'
 
-Import-Module (Join-Path $PSScriptRoot 'Modules\Common.psm1') -Force -DisableNameChecking -Global
-Import-Module (Join-Path $PSScriptRoot 'Modules\Policy.Json.psm1') -Force -DisableNameChecking -Global
-Import-Module (Join-Path $PSScriptRoot 'Modules\Assignments.psm1') -Force -DisableNameChecking -Global
+. $commonPath
+. $policyPath
 
-$script:Theme = @{
-    Back      = [System.Drawing.Color]::FromArgb(18,18,24)
-    Panel     = [System.Drawing.Color]::FromArgb(30,30,38)
-    PanelAlt  = [System.Drawing.Color]::FromArgb(38,38,48)
-    Button    = [System.Drawing.Color]::FromArgb(55,65,81)
-    Accent    = [System.Drawing.Color]::FromArgb(0,120,215)
-    Text      = [System.Drawing.Color]::White
-    Muted     = [System.Drawing.Color]::FromArgb(200,200,210)
-    Border    = [System.Drawing.Color]::FromArgb(70,70,85)
+if (Test-Path -LiteralPath $assignmentsPath) {
+    . $assignmentsPath
 }
 
 function Add-Log {
