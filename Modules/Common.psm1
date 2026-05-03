@@ -25,19 +25,14 @@ function Assert-Mg {
 }
 
 function Get-MDEPolicyName {
-    param(
-        [Parameter(Mandatory)]
-        [string]$Name
-    )
+    param([Parameter(Mandatory)][string]$Name)
 
     "$script:PolicyPrefix - $Name"
 }
 
 function Write-MDELog {
     param(
-        [Parameter(Mandatory)]
-        [string]$Message,
-
+        [Parameter(Mandatory)][string]$Message,
         [ValidateSet('INFO','WARN','ERROR')]
         [string]$Level = 'INFO'
     )
@@ -50,18 +45,14 @@ function Write-MDELog {
             New-Item -ItemType Directory -Path $logFolder -Force | Out-Null
         }
 
-        $logPath = Join-Path $logFolder 'deployment.log'
         $line = "[{0}] [{1}] {2}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Level, $Message
-        Add-Content -LiteralPath $logPath -Value $line
+        Add-Content -LiteralPath (Join-Path $logFolder 'deployment.log') -Value $line
     }
     catch { }
 }
 
 function Get-MDEErrorDetail {
-    param(
-        [Parameter(Mandatory)]
-        $ErrorRecord
-    )
+    param([Parameter(Mandatory)]$ErrorRecord)
 
     try {
         if ($ErrorRecord.ErrorDetails -and $ErrorRecord.ErrorDetails.Message) {
@@ -79,10 +70,7 @@ function Get-MDEErrorDetail {
 }
 
 function Get-MDEJsonBody {
-    param(
-        [Parameter(Mandatory)]
-        [string]$Path
-    )
+    param([Parameter(Mandatory)][string]$Path)
 
     if (-not (Test-Path -LiteralPath $Path)) {
         throw "JSON file not found: $Path"
@@ -99,11 +87,8 @@ function Get-MDEJsonBody {
 
 function Set-MDEPolicyName {
     param(
-        [Parameter(Mandatory)]
-        $Body,
-
-        [Parameter(Mandatory)]
-        [string]$Name
+        [Parameter(Mandatory)]$Body,
+        [Parameter(Mandatory)][string]$Name
     )
 
     $Body.name = Get-MDEPolicyName -Name $Name
@@ -111,10 +96,7 @@ function Set-MDEPolicyName {
 }
 
 function Test-MDEConfigPolicyExists {
-    param(
-        [Parameter(Mandatory)]
-        [string]$Name
-    )
+    param([Parameter(Mandatory)][string]$Name)
 
     Assert-Mg
 
@@ -132,10 +114,7 @@ function Test-MDEConfigPolicyExists {
 }
 
 function Test-MDEJsonPolicyFile {
-    param(
-        [Parameter(Mandatory)]
-        [string]$JsonPath
-    )
+    param([Parameter(Mandatory)][string]$JsonPath)
 
     $name = Split-Path -Path $JsonPath -Leaf
 
@@ -163,12 +142,8 @@ function Test-MDEJsonPolicyFile {
 
 function New-MDEConfigPolicyFromJson {
     param(
-        [Parameter(Mandatory)]
-        [string]$Name,
-
-        [Parameter(Mandatory)]
-        [string]$JsonPath,
-
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$JsonPath,
         [switch]$WhatIf
     )
 
@@ -210,11 +185,8 @@ function New-MDEConfigPolicyFromJson {
 
 function Export-MDEConfigPolicyJson {
     param(
-        [Parameter(Mandatory)]
-        [string]$PolicyName,
-
-        [Parameter(Mandatory)]
-        [string]$OutputPath
+        [Parameter(Mandatory)][string]$PolicyName,
+        [Parameter(Mandatory)][string]$OutputPath
     )
 
     Assert-Mg
@@ -257,6 +229,7 @@ function Export-MDEConfigPolicyJson {
         }
 
         $body | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $OutputPath -Encoding UTF8
+
         Write-MDELog -Message "Exported policy [$PolicyName] to [$OutputPath]"
 
         return New-MDEPolicyResult -Name $PolicyName -Status "Success" -Details "Exported to $OutputPath"
