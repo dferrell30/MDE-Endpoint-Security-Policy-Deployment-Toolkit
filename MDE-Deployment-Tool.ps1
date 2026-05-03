@@ -4,63 +4,14 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 Add-Type -AssemblyName Microsoft.VisualBasic
 
+Remove-Module Common -Force -ErrorAction SilentlyContinue
+Remove-Module Policy.Json -Force -ErrorAction SilentlyContinue
+Remove-Module Assignments -Force -ErrorAction SilentlyContinue
+Remove-Module Baseline.Engine -Force -ErrorAction SilentlyContinue
+
 Import-Module (Join-Path $PSScriptRoot 'Modules\Common.psm1') -Force -DisableNameChecking -Global
 Import-Module (Join-Path $PSScriptRoot 'Modules\Policy.Json.psm1') -Force -DisableNameChecking -Global
 Import-Module (Join-Path $PSScriptRoot 'Modules\Assignments.psm1') -Force -DisableNameChecking -Global
-
-function Test-MDEJsonPolicyFile {
-    param(
-        [Parameter(Mandatory)]
-        [string]$JsonPath
-    )
-
-    $name = Split-Path -Path $JsonPath -Leaf
-
-    if (-not (Test-Path -LiteralPath $JsonPath)) {
-        return New-MDEPolicyResult `
-            -Name $name `
-            -Status "Missing" `
-            -Details "JSON file not found: $JsonPath"
-    }
-
-    try {
-        $raw = Get-Content -LiteralPath $JsonPath -Raw
-
-        if ([string]::IsNullOrWhiteSpace($raw)) {
-            return New-MDEPolicyResult `
-                -Name $name `
-                -Status "Invalid" `
-                -Details "JSON file is empty"
-        }
-
-        $json = $raw | ConvertFrom-Json
-
-        if (-not ($json.PSObject.Properties.Name -contains 'settings')) {
-            return New-MDEPolicyResult `
-                -Name $name `
-                -Status "Invalid" `
-                -Details "Missing settings array"
-        }
-
-        if (-not $json.settings -or $json.settings.Count -lt 1) {
-            return New-MDEPolicyResult `
-                -Name $name `
-                -Status "Invalid" `
-                -Details "Settings array is empty"
-        }
-
-        return New-MDEPolicyResult `
-            -Name $name `
-            -Status "Valid" `
-            -Details "JSON passed basic validation"
-    }
-    catch {
-        return New-MDEPolicyResult `
-            -Name $name `
-            -Status "Invalid" `
-            -Details $_.Exception.Message
-    }
-}
 
 $script:Theme = @{
     Back      = [System.Drawing.Color]::FromArgb(18,18,24)
@@ -280,9 +231,7 @@ $btnInit.Add_Click({
     }
 })
 
-$btnRefresh.Add_Click({
-    Load-PolicyGrid
-})
+$btnRefresh.Add_Click({ Load-PolicyGrid })
 
 $btnValidate.Add_Click({
     $gridResults.Rows.Clear()
@@ -318,9 +267,7 @@ $btnDeploy.Add_Click({
         $policyName = $row.Cells["Name"].Value
         $policy = $catalog | Where-Object { $_.Name -eq $policyName } | Select-Object -First 1
 
-        if (-not $policy) {
-            continue
-        }
+        if (-not $policy) { continue }
 
         try {
             Add-Log "Processing $($policy.Name)..."
@@ -356,15 +303,8 @@ $btnDeployAll.Add_Click({
 
 $btnExport.Add_Click({
     try {
-        Add-Log "Reloading Common module before export..."
-
-        Import-Module (Join-Path $PSScriptRoot 'Modules\Common.psm1') `
-            -Force `
-            -DisableNameChecking `
-            -Global
-
+        Import-Module (Join-Path $PSScriptRoot 'Modules\Common.psm1') -Force -DisableNameChecking -Global
         $exportCmd = Get-Command Export-MDEConfigPolicyJson -ErrorAction Stop
-        Add-Log "Found export command: $($exportCmd.Name) from $($exportCmd.Source)"
 
         $policyName = [Microsoft.VisualBasic.Interaction]::InputBox(
             "Enter the exact existing Intune Settings Catalog policy name to export:",
@@ -383,44 +323,30 @@ $btnExport.Add_Click({
         $saveDialog.FileName = "firewall.json"
 
         if ($saveDialog.ShowDialog() -eq "OK") {
-            Add-Log "Exporting [$policyName] to [$($saveDialog.FileName)]"
-
-            $result = & $exportCmd `
-                -PolicyName $policyName `
-                -OutputPath $saveDialog.FileName
-
+            $result = & $exportCmd -PolicyName $policyName -OutputPath $saveDialog.FileName
             Add-Result -Name $result.Name -Status $result.Status -Details $result.Details
             Load-PolicyGrid
         }
     }
     catch {
         Add-Result -Name "Export" -Status "Failed" -Details $_.Exception.Message
-        Add-Log "Loaded modules:"
-        Get-Module | ForEach-Object {
-            Add-Log " - $($_.Name): $($_.Path)"
-        }
-
         [System.Windows.Forms.MessageBox]::Show($_.Exception.Message,"Export Failed")
     }
 })
 
 $btnOpenConfig.Add_Click({
     $path = Join-Path $PSScriptRoot "Config"
-
     if (-not (Test-Path -LiteralPath $path)) {
         New-Item -ItemType Directory -Path $path -Force | Out-Null
     }
-
     Start-Process $path
 })
 
 $btnOpenLogs.Add_Click({
     $path = Join-Path $PSScriptRoot "Logs"
-
     if (-not (Test-Path -LiteralPath $path)) {
         New-Item -ItemType Directory -Path $path -Force | Out-Null
     }
-
     Start-Process $path
 })
 
