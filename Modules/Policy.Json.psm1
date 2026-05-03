@@ -6,14 +6,17 @@ $script:AntivirusMap = @{
         Type = 'String'
         SettingDefinitionId = 'device_vendor_msft_policy_config_defender_allowcloudprotection'
     }
+
     realTimeMonitoring = @{
         Type = 'String'
         SettingDefinitionId = 'device_vendor_msft_policy_config_defender_allowrealtimemonitoring'
     }
+
     puaProtection = @{
         Type = 'String'
         SettingDefinitionId = 'device_vendor_msft_policy_config_defender_puaprotection'
     }
+
     avgCpuLoadFactor = @{
         Type = 'Integer'
         SettingDefinitionId = 'device_vendor_msft_policy_config_defender_avgcpuloadfactor'
@@ -22,12 +25,19 @@ $script:AntivirusMap = @{
 
 function New-MDEJsonPolicy {
     param(
-        [Parameter(Mandatory)][string]$Name,
-        [Parameter(Mandatory)][string]$JsonPath,
+        [Parameter(Mandatory)]
+        [string]$Name,
+
+        [Parameter(Mandatory)]
+        [string]$JsonPath,
+
         [switch]$WhatIf
     )
 
-    New-MDEConfigPolicyFromJson -Name $Name -JsonPath $JsonPath -WhatIf:$WhatIf
+    New-MDEConfigPolicyFromJson `
+        -Name $Name `
+        -JsonPath $JsonPath `
+        -WhatIf:$WhatIf
 }
 
 function New-MDEAntivirusBaselinePolicy {
@@ -71,13 +81,6 @@ function New-MDEEDRPolicy {
     New-MDEJsonPolicy -Name 'EDR' -JsonPath $path -WhatIf:$WhatIf
 }
 
-function New-MDEWebProtectionPolicy {
-    param([switch]$WhatIf)
-
-    $path = Join-Path (Split-Path $PSScriptRoot -Parent) 'Config\SettingsCatalog\webprotection.json'
-    New-MDEJsonPolicy -Name 'Web Protection' -JsonPath $path -WhatIf:$WhatIf
-}
-
 function New-MDEWindowsSecurityExperiencePolicy {
     param([switch]$WhatIf)
 
@@ -92,13 +95,6 @@ function New-MDEAVCUpdateControlsPolicy {
     New-MDEJsonPolicy -Name 'AVC Update Controls' -JsonPath $path -WhatIf:$WhatIf
 }
 
-function New-MDEApplicationControlPolicy {
-    param([switch]$WhatIf)
-
-    $path = Join-Path (Split-Path $PSScriptRoot -Parent) 'Config\SettingsCatalog\application-control.json'
-    New-MDEJsonPolicy -Name 'Application Control' -JsonPath $path -WhatIf:$WhatIf
-}
-
 function Get-MDEJsonPolicyCatalog {
     $root = Split-Path $PSScriptRoot -Parent
 
@@ -109,53 +105,47 @@ function Get-MDEJsonPolicyCatalog {
             JsonPath = Join-Path $root 'Config\Baselines\antivirus.baseline.json'
             Function = 'New-MDEAntivirusBaselinePolicy'
         }
+
         [pscustomobject]@{
             Name     = 'Antivirus'
             Category = 'Settings Catalog Raw JSON'
             JsonPath = Join-Path $root 'Config\SettingsCatalog\antivirus.json'
             Function = 'New-MDEAntivirusSettingsCatalogPolicy'
         }
+
         [pscustomobject]@{
             Name     = 'Firewall'
             Category = 'Settings Catalog Raw JSON'
             JsonPath = Join-Path $root 'Config\SettingsCatalog\firewall.json'
             Function = 'New-MDEFirewallPolicy'
         }
+
         [pscustomobject]@{
             Name     = 'ASR'
             Category = 'Settings Catalog Raw JSON'
             JsonPath = Join-Path $root 'Config\SettingsCatalog\asr.json'
             Function = 'New-MDEASRPolicy'
         }
+
         [pscustomobject]@{
             Name     = 'EDR'
             Category = 'Settings Catalog Raw JSON'
             JsonPath = Join-Path $root 'Config\SettingsCatalog\edr.json'
             Function = 'New-MDEEDRPolicy'
         }
-        [pscustomobject]@{
-            Name     = 'Web Protection'
-            Category = 'Settings Catalog Raw JSON'
-            JsonPath = Join-Path $root 'Config\SettingsCatalog\webprotection.json'
-            Function = 'New-MDEWebProtectionPolicy'
-        }
+
         [pscustomobject]@{
             Name     = 'Windows Security Experience'
             Category = 'Settings Catalog Raw JSON'
             JsonPath = Join-Path $root 'Config\SettingsCatalog\windows-security-experience.json'
             Function = 'New-MDEWindowsSecurityExperiencePolicy'
         }
+
         [pscustomobject]@{
             Name     = 'AVC Update Controls'
             Category = 'Settings Catalog Raw JSON'
             JsonPath = Join-Path $root 'Config\SettingsCatalog\avc-update-controls.json'
             Function = 'New-MDEAVCUpdateControlsPolicy'
-        }
-        [pscustomobject]@{
-            Name     = 'Application Control'
-            Category = 'Settings Catalog Raw JSON'
-            JsonPath = Join-Path $root 'Config\SettingsCatalog\application-control.json'
-            Function = 'New-MDEApplicationControlPolicy'
         }
     )
 }
@@ -167,9 +157,7 @@ Export-ModuleMember -Function @(
     'New-MDEFirewallPolicy',
     'New-MDEASRPolicy',
     'New-MDEEDRPolicy',
-    'New-MDEWebProtectionPolicy',
     'New-MDEWindowsSecurityExperiencePolicy',
     'New-MDEAVCUpdateControlsPolicy',
-    'New-MDEApplicationControlPolicy',
     'Get-MDEJsonPolicyCatalog'
 )
