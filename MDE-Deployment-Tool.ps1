@@ -4,70 +4,228 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 Add-Type -AssemblyName Microsoft.VisualBasic
 
-Import-Module (Join-Path $PSScriptRoot 'Modules\Common.psm1') -Force -DisableNameChecking -Global
-Import-Module (Join-Path $PSScriptRoot 'Modules\Policy.Json.psm1') -Force -DisableNameChecking -Global
+$PolicyPrefix = "MDE"
 
-$assignmentsPath = Join-Path $PSScriptRoot 'Modules\Assignments.psm1'
-if (Test-Path -LiteralPath $assignmentsPath) {
-    Import-Module $assignmentsPath -Force -DisableNameChecking -Global
+function New-MDEPolicyResult {
+    param([string]$Name,[string]$Status,[string]$Details)
+    [pscustomobject]@{ Name=$Name; Status=$Status; Details=$Details; Time=Get-Date }
 }
 
-# Local fallback so UI validation never breaks if module export fails
-if (-not (Get-Command New-MDEPolicyResult -ErrorAction SilentlyContinue)) {
-    function New-MDEPolicyResult {
-        param([string]$Name,[string]$Status,[string]$Details)
+function Get-MDEPolicyName {
+    param([string]$Name)
+    "$PolicyPrefix - $Name"
+}
 
-        [pscustomobject]@{
-            Name    = $Name
-            Status  = $Status
-            Details = $Details
-            Time    = Get-Date
-        }
+function Assert-Mg {
+    if (-not (Get-MgContext)) {
+        throw "Not connected to Microsoft Graph. Click Initialize Graph first."
     }
+}
+
+function Get-MDEJsonBody {
+    param([string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        throw "JSON file not found: $Path"
+    }
+
+    $raw = Get-Content -LiteralPath $Path -Raw
+    if ([string]::IsNullOrWhiteSpace($raw)) {
+        throw "JSON file is empty: $Path"
+    }
+
+    $raw | ConvertFrom-Json
 }
 
 function Test-MDEJsonPolicyFile {
-    param([Parameter(Mandatory)][string]$JsonPath)
+    param([string]$JsonPath)
 
-    $name = Split-Path -Path $JsonPath -Leaf
-
-    if (-not (Test-Path -LiteralPath $JsonPath)) {
-        return New-MDEPolicyResult -Name $name -Status "Missing" -Details "JSON file not found: $JsonPath"
-    }
+    $name = Split-Path $JsonPath -Leaf
 
     try {
-        $raw = Get-Content -LiteralPath $JsonPath -Raw
+        $json = Get-MDEJsonBody -Path $JsonPath
 
-        if ([string]::IsNullOrWhiteSpace($raw)) {
-            return New-MDEPolicyResult -Name $name -Status "Invalid" -Details "JSON file is empty"
-        }
-
-        $json = $raw | ConvertFrom-Json
-
-        if (-not ($json.PSObject.Properties.Name -contains 'settings')) {
-            return New-MDEPolicyResult -Name $name -Status "Invalid" -Details "Missing settings array"
+        if (-not ($json.PSObject.Properties.Name -contains "settings")) {
+            return New-MDEPolicyResult $name "Invalid" "Missing settings array"
         }
 
         if (-not $json.settings -or $json.settings.Count -lt 1) {
-            return New-MDEPolicyResult -Name $name -Status "Invalid" -Details "Settings array is empty"
+            return New-MDEPolicyResult $name "Invalid" "Settings array is empty"
         }
 
-        return New-MDEPolicyResult -Name $name -Status "Valid" -Details "JSON passed basic validation"
+        return New-MDEPolicyResult $name "Valid" "JSON passed basic validation"
     }
     catch {
-        return New-MDEPolicyResult -Name $name -Status "Invalid" -Details $_.Exception.Message
+        return New-MDEPolicyResult $name "Invalid" $_.Exception.Message
     }
 }
 
+function Test-MDEConfigPolicyExists {
+    param([string]$Name)
+
+    Assert-Mg
+
+    $displayName = Get-MDEPolicyName $Name
+    $escaped = $displayName.Replace("'","''")
+    $uri = "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies?`$filter=name eq '$escaped'"
+
+    try {
+        $result = Invoke-MgGraphRequest -Method GET -Uri $uri -OutputType PSObject
+        return [bool]($result.value -and $result.value.Count -gt 0)
+    }
+    catch {
+        return $false
+    }
+}
+
+function New-MDEConfigPolicyFromJson {
+    param(
+        [string]$Name,
+        [string]$JsonPath,
+        [switch]$WhatIf
+    )
+
+    Assert-Mg
+
+    $displayName = Get-MDEPolicyName $Name
+
+    try {
+        if (Test-MDEConfigPolicyExists -Name $Name) {
+            return New-MDEPolicyResult $displayName "Skipped" "Policy already exists"
+        }
+
+        $body = Get-MDEJsonBody -Path $JsonPath
+        $body.name = $displayName
+
+        $json = $body | ConvertTo-Json -Depth 100 -Compress
+
+        if ($WhatIf) {
+            return New-MDEPolicyResult $displayName "WhatIf" "Validated JSON only: $JsonPath"
+        }
+
+        Invoke-MgGraphRequest `
+            -Method POST `
+            -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies" `
+            -Body $json `
+            -ContentType "application/json" | Out-Null
+
+        return New-MDEPolicyResult $displayName "Success" "Created configuration policy"
+    }
+    catch {
+        return New-MDEPolicyResult $displayName "Failed" $_.Exception.Message
+    }
+}
+
+function Export-MDEConfigPolicyJson {
+    param(
+        [string]$PolicyName,
+        [string]$OutputPath
+    )
+
+    Assert-Mg
+
+    try {
+        $escaped = $PolicyName.Replace("'","''")
+        $policyUri = "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies?`$filter=name eq '$escaped'"
+        $policy = Invoke-MgGraphRequest -Method GET -Uri $policyUri -OutputType PSObject
+
+        if (-not $policy.value -or $policy.value.Count -eq 0) {
+            throw "Policy not found: $PolicyName"
+        }
+
+        $p = $policy.value[0]
+        $settingsUri = "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/$($p.id)/settings"
+        $settings = Invoke-MgGraphRequest -Method GET -Uri $settingsUri -OutputType PSObject
+
+        if (-not $settings.value -or $settings.value.Count -eq 0) {
+            throw "Policy found, but no settings were returned: $PolicyName"
+        }
+
+        $body = [ordered]@{
+            name            = $p.name
+            description     = $p.description
+            platforms       = $p.platforms
+            technologies    = $p.technologies
+            roleScopeTagIds = @($p.roleScopeTagIds)
+            settings        = @($settings.value)
+        }
+
+        if ($p.PSObject.Properties.Name -contains "templateReference" -and $p.templateReference) {
+            $body.templateReference = $p.templateReference
+        }
+
+        $folder = Split-Path $OutputPath -Parent
+        if ($folder -and -not (Test-Path -LiteralPath $folder)) {
+            New-Item -ItemType Directory -Path $folder -Force | Out-Null
+        }
+
+        $body | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $OutputPath -Encoding UTF8
+
+        return New-MDEPolicyResult $PolicyName "Success" "Exported to $OutputPath"
+    }
+    catch {
+        return New-MDEPolicyResult $PolicyName "Failed" $_.Exception.Message
+    }
+}
+
+function Get-MDEJsonPolicyCatalog {
+    @(
+        [pscustomobject]@{
+            Name="Antivirus"
+            Category="Settings Catalog"
+            JsonPath=(Join-Path $PSScriptRoot "Config\SettingsCatalog\antivirus.json")
+        }
+        [pscustomobject]@{
+            Name="Firewall"
+            Category="Settings Catalog"
+            JsonPath=(Join-Path $PSScriptRoot "Config\SettingsCatalog\firewall.json")
+        }
+        [pscustomobject]@{
+            Name="ASR"
+            Category="Settings Catalog"
+            JsonPath=(Join-Path $PSScriptRoot "Config\SettingsCatalog\asr.json")
+        }
+        [pscustomobject]@{
+            Name="EDR"
+            Category="Settings Catalog"
+            JsonPath=(Join-Path $PSScriptRoot "Config\SettingsCatalog\edr.json")
+        }
+        [pscustomobject]@{
+            Name="Windows Security Experience"
+            Category="Settings Catalog"
+            JsonPath=(Join-Path $PSScriptRoot "Config\SettingsCatalog\windows-security-experience.json")
+        }
+        [pscustomobject]@{
+            Name="AVC Update Controls"
+            Category="Settings Catalog"
+            JsonPath=(Join-Path $PSScriptRoot "Config\SettingsCatalog\avc-update-controls.json")
+        }
+    )
+}
+
 $Theme = @{
-    Back      = [System.Drawing.Color]::FromArgb(18,18,24)
-    Panel     = [System.Drawing.Color]::FromArgb(30,30,38)
-    PanelAlt  = [System.Drawing.Color]::FromArgb(38,38,48)
-    Button    = [System.Drawing.Color]::FromArgb(55,65,81)
-    Accent    = [System.Drawing.Color]::FromArgb(0,120,215)
-    Text      = [System.Drawing.Color]::White
-    Muted     = [System.Drawing.Color]::FromArgb(200,200,210)
-    Border    = [System.Drawing.Color]::FromArgb(70,70,85)
+    Back     = [System.Drawing.Color]::FromArgb(18,18,24)
+    Panel    = [System.Drawing.Color]::FromArgb(30,30,38)
+    PanelAlt = [System.Drawing.Color]::FromArgb(38,38,48)
+    Button   = [System.Drawing.Color]::FromArgb(55,65,81)
+    Accent   = [System.Drawing.Color]::FromArgb(0,120,215)
+    Text     = [System.Drawing.Color]::White
+    Muted    = [System.Drawing.Color]::FromArgb(200,200,210)
+    Border   = [System.Drawing.Color]::FromArgb(70,70,85)
+}
+
+function New-DarkButton {
+    param([string]$Text,[int]$X,[int]$Y,[int]$W,[int]$H)
+
+    $b = New-Object System.Windows.Forms.Button
+    $b.Text = $Text
+    $b.Location = New-Object System.Drawing.Point($X,$Y)
+    $b.Size = New-Object System.Drawing.Size($W,$H)
+    $b.FlatStyle = "Flat"
+    $b.BackColor = $Theme.Button
+    $b.ForeColor = $Theme.Text
+    $b.FlatAppearance.BorderColor = $Theme.Border
+    return $b
 }
 
 function Add-Log {
@@ -75,70 +233,23 @@ function Add-Log {
     $txtLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] $Message`r`n")
 }
 
-function New-DarkButton {
-    param([string]$Text,[int]$X,[int]$Y,[int]$W,[int]$H)
-
-    $button = New-Object System.Windows.Forms.Button
-    $button.Text = $Text
-    $button.Location = New-Object System.Drawing.Point($X,$Y)
-    $button.Size = New-Object System.Drawing.Size($W,$H)
-    $button.FlatStyle = 'Flat'
-    $button.BackColor = $Theme.Button
-    $button.ForeColor = $Theme.Text
-    $button.FlatAppearance.BorderColor = $Theme.Border
-    $button.FlatAppearance.MouseOverBackColor = $Theme.Accent
-    return $button
-}
-
-function Set-ResultRowColor {
-    param([System.Windows.Forms.DataGridViewRow]$Row,[string]$Status)
-
-    switch ($Status) {
-        "Success"  { $Row.DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(22,101,52) }
-        "Assigned" { $Row.DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(22,101,52) }
-        "Valid"    { $Row.DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(22,101,52) }
-        "WhatIf"   { $Row.DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(30,64,175) }
-        "Skipped"  { $Row.DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(113,63,18) }
-        "Missing"  { $Row.DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(113,63,18) }
-        "Failed"   { $Row.DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(127,29,29) }
-        "Invalid"  { $Row.DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(127,29,29) }
-        default    { $Row.DefaultCellStyle.BackColor = $Theme.PanelAlt }
-    }
-
-    $Row.DefaultCellStyle.ForeColor = [System.Drawing.Color]::White
-}
-
 function Add-Result {
     param([string]$Name,[string]$Status,[string]$Details)
 
-    $rowIndex = $gridResults.Rows.Add($Name,$Status,$Details)
-    Set-ResultRowColor -Row $gridResults.Rows[$rowIndex] -Status $Status
+    $row = $gridResults.Rows.Add($Name,$Status,$Details)
+
+    switch ($Status) {
+        "Success" { $gridResults.Rows[$row].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(22,101,52) }
+        "Valid"   { $gridResults.Rows[$row].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(22,101,52) }
+        "WhatIf"  { $gridResults.Rows[$row].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(30,64,175) }
+        "Skipped" { $gridResults.Rows[$row].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(113,63,18) }
+        "Missing" { $gridResults.Rows[$row].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(113,63,18) }
+        "Failed"  { $gridResults.Rows[$row].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(127,29,29) }
+        "Invalid" { $gridResults.Rows[$row].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(127,29,29) }
+    }
+
+    $gridResults.Rows[$row].DefaultCellStyle.ForeColor = [System.Drawing.Color]::White
     Add-Log "${Name}: $Status - $Details"
-}
-
-function Invoke-PolicyDeployFromCatalogItem {
-    param([Parameter(Mandatory)]$Policy)
-
-    if (-not (Test-Path -LiteralPath $Policy.JsonPath)) {
-        return New-MDEPolicyResult -Name $Policy.Name -Status "Skipped" -Details "Missing JSON file: $($Policy.JsonPath)"
-    }
-
-    $cmd = Get-Command $Policy.Function -ErrorAction Stop
-    $result = & $cmd -WhatIf:$chkWhatIf.Checked
-
-    if ($chkAssignAfterDeploy.Checked -and -not $chkWhatIf.Checked) {
-        if ($result.Status -in @("Success","Skipped")) {
-            if (Get-Command Add-MDEAssignmentFromConfig -ErrorAction SilentlyContinue) {
-                $assignResult = Add-MDEAssignmentFromConfig -PolicyFriendlyName $Policy.Name
-                Add-Result -Name $assignResult.Name -Status $assignResult.Status -Details $assignResult.Details
-            }
-            else {
-                Add-Result -Name $Policy.Name -Status "Skipped" -Details "Assignment module/function not loaded"
-            }
-        }
-    }
-
-    return $result
 }
 
 $form = New-Object System.Windows.Forms.Form
@@ -152,14 +263,14 @@ $form.Font = New-Object System.Drawing.Font("Segoe UI",9)
 $title = New-Object System.Windows.Forms.Label
 $title.Text = "Defender for Endpoint Deployment Tool"
 $title.Location = New-Object System.Drawing.Point(20,15)
-$title.Size = New-Object System.Drawing.Size(600,32)
+$title.Size = New-Object System.Drawing.Size(650,32)
 $title.Font = New-Object System.Drawing.Font("Segoe UI Semibold",16,[System.Drawing.FontStyle]::Bold)
 $title.ForeColor = $Theme.Text
 $title.BackColor = $Theme.Back
 $form.Controls.Add($title)
 
 $subtitle = New-Object System.Windows.Forms.Label
-$subtitle.Text = "JSON-driven Settings Catalog policy deployment"
+$subtitle.Text = "Single-file JSON-driven Settings Catalog deployment"
 $subtitle.Location = New-Object System.Drawing.Point(22,48)
 $subtitle.Size = New-Object System.Drawing.Size(650,24)
 $subtitle.ForeColor = $Theme.Muted
@@ -168,19 +279,11 @@ $form.Controls.Add($subtitle)
 
 $chkWhatIf = New-Object System.Windows.Forms.CheckBox
 $chkWhatIf.Text = "WhatIf / Validate only"
-$chkWhatIf.Location = New-Object System.Drawing.Point(700,25)
+$chkWhatIf.Location = New-Object System.Drawing.Point(720,25)
 $chkWhatIf.Size = New-Object System.Drawing.Size(180,24)
 $chkWhatIf.ForeColor = $Theme.Text
 $chkWhatIf.BackColor = $Theme.Back
 $form.Controls.Add($chkWhatIf)
-
-$chkAssignAfterDeploy = New-Object System.Windows.Forms.CheckBox
-$chkAssignAfterDeploy.Text = "Assign after deploy"
-$chkAssignAfterDeploy.Location = New-Object System.Drawing.Point(700,50)
-$chkAssignAfterDeploy.Size = New-Object System.Drawing.Size(180,24)
-$chkAssignAfterDeploy.ForeColor = $Theme.Text
-$chkAssignAfterDeploy.BackColor = $Theme.Back
-$form.Controls.Add($chkAssignAfterDeploy)
 
 $btnInit = New-DarkButton "Initialize Graph" 940 20 120 34
 $form.Controls.Add($btnInit)
@@ -190,19 +293,17 @@ $gridPolicies.Location = New-Object System.Drawing.Point(20,90)
 $gridPolicies.Size = New-Object System.Drawing.Size(650,430)
 $gridPolicies.BackgroundColor = $Theme.Panel
 $gridPolicies.GridColor = $Theme.Border
-$gridPolicies.ForeColor = $Theme.Text
 $gridPolicies.DefaultCellStyle.BackColor = $Theme.PanelAlt
 $gridPolicies.DefaultCellStyle.ForeColor = $Theme.Text
 $gridPolicies.DefaultCellStyle.SelectionBackColor = $Theme.Accent
-$gridPolicies.DefaultCellStyle.SelectionForeColor = $Theme.Text
 $gridPolicies.ColumnHeadersDefaultCellStyle.BackColor = $Theme.Button
 $gridPolicies.ColumnHeadersDefaultCellStyle.ForeColor = $Theme.Text
 $gridPolicies.EnableHeadersVisualStyles = $false
 $gridPolicies.RowHeadersVisible = $false
 $gridPolicies.AllowUserToAddRows = $false
-$gridPolicies.SelectionMode = 'FullRowSelect'
+$gridPolicies.SelectionMode = "FullRowSelect"
 $gridPolicies.MultiSelect = $true
-$gridPolicies.AutoSizeColumnsMode = 'Fill'
+$gridPolicies.AutoSizeColumnsMode = "Fill"
 [void]$gridPolicies.Columns.Add("Name","Policy")
 [void]$gridPolicies.Columns.Add("Category","Category")
 [void]$gridPolicies.Columns.Add("JsonPath","JSON Path")
@@ -214,17 +315,15 @@ $gridResults.Location = New-Object System.Drawing.Point(690,90)
 $gridResults.Size = New-Object System.Drawing.Size(370,250)
 $gridResults.BackgroundColor = $Theme.Panel
 $gridResults.GridColor = $Theme.Border
-$gridResults.ForeColor = $Theme.Text
 $gridResults.DefaultCellStyle.BackColor = $Theme.PanelAlt
 $gridResults.DefaultCellStyle.ForeColor = $Theme.Text
 $gridResults.DefaultCellStyle.SelectionBackColor = $Theme.Accent
-$gridResults.DefaultCellStyle.SelectionForeColor = $Theme.Text
 $gridResults.ColumnHeadersDefaultCellStyle.BackColor = $Theme.Button
 $gridResults.ColumnHeadersDefaultCellStyle.ForeColor = $Theme.Text
 $gridResults.EnableHeadersVisualStyles = $false
 $gridResults.RowHeadersVisible = $false
 $gridResults.AllowUserToAddRows = $false
-$gridResults.AutoSizeColumnsMode = 'Fill'
+$gridResults.AutoSizeColumnsMode = "Fill"
 [void]$gridResults.Columns.Add("Name","Name")
 [void]$gridResults.Columns.Add("Status","Status")
 [void]$gridResults.Columns.Add("Details","Details")
@@ -234,7 +333,7 @@ $txtLog = New-Object System.Windows.Forms.TextBox
 $txtLog.Location = New-Object System.Drawing.Point(20,540)
 $txtLog.Size = New-Object System.Drawing.Size(1040,120)
 $txtLog.Multiline = $true
-$txtLog.ScrollBars = 'Vertical'
+$txtLog.ScrollBars = "Vertical"
 $txtLog.BackColor = [System.Drawing.Color]::FromArgb(12,12,16)
 $txtLog.ForeColor = $Theme.Text
 $txtLog.Font = New-Object System.Drawing.Font("Consolas",9)
@@ -244,31 +343,16 @@ $btnRefresh = New-DarkButton "Refresh JSON List" 690 360 170 36
 $btnDeploy = New-DarkButton "Deploy Selected" 890 360 170 36
 $btnExport = New-DarkButton "Export Existing Policy" 690 410 170 36
 $btnOpenConfig = New-DarkButton "Open Config Folder" 890 410 170 36
-$btnOpenLogs = New-DarkButton "Open Logs Folder" 690 460 170 36
 $btnValidate = New-DarkButton "Validate JSON" 890 460 170 36
-$btnDeployAll = New-DarkButton "Deploy All Valid" 890 510 170 36
-
-$form.Controls.AddRange(@(
-    $btnRefresh,$btnDeploy,$btnExport,
-    $btnOpenConfig,$btnOpenLogs,$btnValidate,$btnDeployAll
-))
+$form.Controls.AddRange(@($btnRefresh,$btnDeploy,$btnExport,$btnOpenConfig,$btnValidate))
 
 function Load-PolicyGrid {
     $gridPolicies.Rows.Clear()
-
-    try {
-        $catalog = Get-MDEJsonPolicyCatalog
-
-        foreach ($p in $catalog) {
-            $exists = Test-Path -LiteralPath $p.JsonPath
-            [void]$gridPolicies.Rows.Add($p.Name,$p.Category,$p.JsonPath,$exists)
-        }
-
-        Add-Log "Loaded policy catalog."
+    foreach ($p in Get-MDEJsonPolicyCatalog) {
+        $exists = Test-Path -LiteralPath $p.JsonPath
+        [void]$gridPolicies.Rows.Add($p.Name,$p.Category,$p.JsonPath,$exists)
     }
-    catch {
-        Add-Log "Failed loading policy catalog: $($_.Exception.Message)"
-    }
+    Add-Log "Loaded policy catalog."
 }
 
 $btnInit.Add_Click({
@@ -276,157 +360,67 @@ $btnInit.Add_Click({
         Connect-MgGraph -Scopes @(
             "DeviceManagementConfiguration.ReadWrite.All",
             "DeviceManagementManagedDevices.Read.All",
-            "Directory.Read.All",
-            "Group.Read.All"
+            "Directory.Read.All"
         ) -NoWelcome
-
         Add-Log "Connected to Microsoft Graph."
-        [System.Windows.Forms.MessageBox]::Show("Connected to Microsoft Graph.","Graph Connected")
     }
     catch {
-        Add-Log "Graph connection failed: $($_.Exception.Message)"
-        [System.Windows.Forms.MessageBox]::Show($_.Exception.Message,"Graph Error")
+        Add-Result "Graph" "Failed" $_.Exception.Message
     }
 })
 
-$btnRefresh.Add_Click({
-    Load-PolicyGrid
-})
+$btnRefresh.Add_Click({ Load-PolicyGrid })
 
 $btnValidate.Add_Click({
     $gridResults.Rows.Clear()
-
-    try {
-        $catalog = Get-MDEJsonPolicyCatalog
-
-        foreach ($policy in $catalog) {
-            if ($policy.Category -eq 'Editable Baseline') {
-                if (Test-Path -LiteralPath $policy.JsonPath) {
-                    Add-Result -Name $policy.Name -Status "Valid" -Details "Baseline JSON exists"
-                }
-                else {
-                    Add-Result -Name $policy.Name -Status "Missing" -Details "Missing baseline JSON: $($policy.JsonPath)"
-                }
-            }
-            else {
-                $result = Test-MDEJsonPolicyFile -JsonPath $policy.JsonPath
-                Add-Result -Name $result.Name -Status $result.Status -Details $result.Details
-            }
-        }
-    }
-    catch {
-        Add-Result -Name "Validation" -Status "Failed" -Details $_.Exception.Message
+    foreach ($p in Get-MDEJsonPolicyCatalog) {
+        $result = Test-MDEJsonPolicyFile -JsonPath $p.JsonPath
+        Add-Result $result.Name $result.Status $result.Details
     }
 })
 
 $btnDeploy.Add_Click({
     $gridResults.Rows.Clear()
 
-    if ($gridPolicies.SelectedRows.Count -eq 0) {
-        [System.Windows.Forms.MessageBox]::Show("Select one or more policies first.","No Selection")
-        return
-    }
-
-    $catalog = Get-MDEJsonPolicyCatalog
-
     foreach ($row in $gridPolicies.SelectedRows) {
-        $policyName = $row.Cells["Name"].Value
-        $policy = $catalog | Where-Object { $_.Name -eq $policyName } | Select-Object -First 1
+        $name = $row.Cells["Name"].Value
+        $path = $row.Cells["JsonPath"].Value
 
-        if (-not $policy) { continue }
+        $result = New-MDEConfigPolicyFromJson `
+            -Name $name `
+            -JsonPath $path `
+            -WhatIf:$chkWhatIf.Checked
 
-        try {
-            Add-Log "Processing $($policy.Name)..."
-            $result = Invoke-PolicyDeployFromCatalogItem -Policy $policy
-            Add-Result -Name $result.Name -Status $result.Status -Details $result.Details
-        }
-        catch {
-            Add-Result -Name $policy.Name -Status "Failed" -Details $_.Exception.Message
-        }
-    }
-})
-
-$btnDeployAll.Add_Click({
-    $gridResults.Rows.Clear()
-
-    try {
-        $catalog = Get-MDEJsonPolicyCatalog
-
-        foreach ($policy in $catalog) {
-            if (-not (Test-Path -LiteralPath $policy.JsonPath)) {
-                Add-Log "Skipping $($policy.Name): missing JSON"
-                continue
-            }
-
-            try {
-                Add-Log "Deploying $($policy.Name)..."
-                $result = Invoke-PolicyDeployFromCatalogItem -Policy $policy
-                Add-Result -Name $result.Name -Status $result.Status -Details $result.Details
-            }
-            catch {
-                Add-Result -Name $policy.Name -Status "Failed" -Details $_.Exception.Message
-            }
-        }
-    }
-    catch {
-        Add-Result -Name "Deploy All" -Status "Failed" -Details $_.Exception.Message
+        Add-Result $result.Name $result.Status $result.Details
     }
 })
 
 $btnExport.Add_Click({
-    try {
-        if (-not (Get-Command Export-MDEConfigPolicyJson -ErrorAction SilentlyContinue)) {
-            Add-Result -Name "Export" -Status "Failed" -Details "Export-MDEConfigPolicyJson is not loaded from Common.psm1"
-            return
-        }
+    $policyName = [Microsoft.VisualBasic.Interaction]::InputBox(
+        "Enter the exact existing Intune Settings Catalog policy name:",
+        "Export Policy JSON",
+        ""
+    )
 
-        $policyName = [Microsoft.VisualBasic.Interaction]::InputBox(
-            "Enter the exact existing Intune Settings Catalog policy name to export:",
-            "Export Policy JSON",
-            ""
-        )
-
-        if ([string]::IsNullOrWhiteSpace($policyName)) {
-            Add-Log "Export cancelled."
-            return
-        }
-
-        $saveDialog = New-Object System.Windows.Forms.SaveFileDialog
-        $saveDialog.Filter = "JSON files (*.json)|*.json"
-        $saveDialog.InitialDirectory = Join-Path $PSScriptRoot "Config\SettingsCatalog"
-        $saveDialog.FileName = "firewall.json"
-
-        if ($saveDialog.ShowDialog() -eq "OK") {
-            $result = Export-MDEConfigPolicyJson `
-                -PolicyName $policyName `
-                -OutputPath $saveDialog.FileName
-
-            Add-Result -Name $result.Name -Status $result.Status -Details $result.Details
-            Load-PolicyGrid
-        }
+    if ([string]::IsNullOrWhiteSpace($policyName)) {
+        return
     }
-    catch {
-        Add-Result -Name "Export" -Status "Failed" -Details $_.Exception.Message
-        [System.Windows.Forms.MessageBox]::Show($_.Exception.Message,"Export Failed")
+
+    $saveDialog = New-Object System.Windows.Forms.SaveFileDialog
+    $saveDialog.Filter = "JSON files (*.json)|*.json"
+    $saveDialog.InitialDirectory = Join-Path $PSScriptRoot "Config\SettingsCatalog"
+    $saveDialog.FileName = "firewall.json"
+
+    if ($saveDialog.ShowDialog() -eq "OK") {
+        $result = Export-MDEConfigPolicyJson -PolicyName $policyName -OutputPath $saveDialog.FileName
+        Add-Result $result.Name $result.Status $result.Details
+        Load-PolicyGrid
     }
 })
 
 $btnOpenConfig.Add_Click({
-    $path = Join-Path $PSScriptRoot "Config"
-    if (-not (Test-Path -LiteralPath $path)) {
-        New-Item -ItemType Directory -Path $path -Force | Out-Null
-    }
-    Start-Process $path
-})
-
-$btnOpenLogs.Add_Click({
-    $path = Join-Path $PSScriptRoot "Logs"
-    if (-not (Test-Path -LiteralPath $path)) {
-        New-Item -ItemType Directory -Path $path -Force | Out-Null
-    }
-    Start-Process $path
+    Start-Process (Join-Path $PSScriptRoot "Config")
 })
 
 Load-PolicyGrid
-
 [void]$form.ShowDialog()
