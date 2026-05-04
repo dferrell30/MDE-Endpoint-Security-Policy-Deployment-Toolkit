@@ -25,7 +25,8 @@ This tool provides a **simple deployment engine** that:
 - Uses JSON-based configurations  
 - Automates policy creation via Microsoft Graph  
 - Enables repeatable security deployments  
-- Integrates with testing to validate security controls  
+- Supports Defender Antivirus baseline configuration via Settings Catalog  
+- Integrates with testing to validate security controls   
 
 ---
 
@@ -45,17 +46,41 @@ The following Defender policy types are supported:
 
 - 🔥 Firewall  
 - 🛡️ Attack Surface Reduction (ASR)  
-- 📡 Endpoint Detection & Response (EDR) *(cleaned / supported settings only)*  
+- 📡 Endpoint Detection & Response (EDR) *(supported settings only)*  
 - 🪟 Windows Security Experience  
-- 🔄 AV Configuration Controls (non-Endpoint Security)  
+- 🛡️ Defender Antivirus (Settings Catalog / AV Configuration Controls)
 
 ---
 
-## ⚠️ Important: Antivirus (AV)
+## 🛡️ Defender Antivirus (AV)
 
-Antivirus policies are **NOT deployed through this tool** in Phase 1.
+This tool supports deployment of Defender Antivirus settings via **Settings Catalog (AV Configuration Controls)**.
 
-AV must be managed through:
+### ⚠️ Important Notes
+
+- Only **supported Settings Catalog AV settings** should be used  
+- Some AV settings (such as onboarding and certain advanced configurations) are **not compatible** with Graph deployment  
+- Endpoint Security Antivirus profiles use a different backend and are **not currently targeted in Phase 1**
+
+### Recommended Approach
+
+- Use this tool for **baseline AV configuration**
+- Use Intune Endpoint Security for:
+  - Advanced AV configurations  
+  - Onboarding and tenant-bound settings
+ 
+
+## ⚠️ Known Limitations
+
+This tool focuses on **Settings Catalog-based deployment via Microsoft Graph**.  
+Some Defender capabilities behave differently or require alternative deployment methods.
+
+---
+
+### 🔥 Firewall Policies
+
+- Firewall policies must be created and exported from:
+  
 
 
 🤝 Feedback
