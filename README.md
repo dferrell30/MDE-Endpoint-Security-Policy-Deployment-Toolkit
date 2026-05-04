@@ -59,4 +59,170 @@ Some Defender capabilities require alternative deployment methods.
 ### 🔥 Firewall Policies
 
 - Must be created and exported from:
+
+
+- ❌ Endpoint Security Firewall profiles are not supported  
+- ✅ Only Settings Catalog firewall configurations can be deployed  
+
+---
+
+### 🛡️ Defender Antivirus (AV)
+
+- Supported via **Settings Catalog (AV Configuration Controls)**  
+
+Limitations:
+
+- ❌ Onboarding / connector-based settings  
+- ❌ Tenant-bound or encrypted values  
+- ❌ Some advanced AV configurations  
+
+Recommended:
+
+
+Use Endpoint Security for:
+- Advanced configurations  
+- Onboarding  
+- Tenant-specific settings  
+
+---
+
+### 📡 Endpoint Detection & Response (EDR)
+
+- Connector-based onboarding is **not supported**  
+
+Do NOT include:
+
+
+- Only supported, non-connector-based settings should be used  
+
+---
+
+### ⚙️ Settings Catalog Dependency
+
+- All policies must originate from **Settings Catalog exports**  
+
+Hand-built JSON may fail due to:
+
+- Incorrect setting types (Simple vs Choice)  
+- Missing template references  
+- Invalid values for tenant-specific schemas  
+
+---
+
+### 🔐 Graph API Constraints
+
+This tool uses:
+
+
+Some Defender features use different APIs and are not included in Phase 1.
+
+---
+
+### 🧪 Validation Scope
+
+Built-in validation checks:
+
+- JSON structure  
+- Presence of settings  
+
+Does NOT validate:
+
+- Tenant compatibility  
+- Setting-level Graph constraints  
+- Endpoint Security template conflicts  
+
+---
+
+### 🚧 Phase 1 Scope
+
+This tool is designed for:
+
+- Repeatable baseline deployment  
+- Settings Catalog policy automation  
+
+Not included yet:
+
+- Automatic policy assignment  
+- Endpoint Security policy deployment  
+- Drift detection  
+
+---
+
+## 📁 Repository Structure
+
+MDE-EndpointSecurityPolicyDeployment-Tool/
+│
+├─ MDE-Deployment-Tool.ps1
+│
+├─ Config/
+│ └─ SettingsCatalog/
+│ ├─ firewall.json
+│ ├─ asr.json
+│ ├─ edr.json
+│ ├─ windows-security-experience.json
+│ └─ avc-update-controls.json
+│
+├─ Logs/
+└─ Reports/
+
+---
+
+## 🧠 How It Works
+
+Create policy in Intune
+Export JSON using the tool
+Store JSON in the repo
+Reuse for deployment
+
+---
+
+## 🔁 Integration with Testing Framework
+
+This tool is designed to work alongside:
+
+👉 https://github.com/dferrell30/MDE-Test-Framework :contentReference[oaicite:0]{index=0}
+
+Together, they enable:
+
+
+Deploy → Test → Validate → Repeat
+
+
+---
+
+## ⚠️ Disclaimer
+
+This project is intended for **defensive security validation and educational use only**.
+
+- Do not use in unauthorized environments  
+- Do not use for offensive or malicious purposes  
+- Always test in approved lab or enterprise environments  
+
+Some actions may generate security telemetry and alerts.
+
+---
+
+## ⚖️ Professional Disclaimer
+
+This project is an independent work developed in a personal capacity.
+
+- It is not affiliated with or endorsed by Microsoft  
+- No employer has reviewed or approved this work  
+- No proprietary or confidential resources were used  
+
+All opinions and content are solely my own.
+
+---
+
+## 🤝 Feedback
+
+Feedback, ideas, and suggestions are welcome.
+
+---
+
+## 📣 Author
+
+Built to simplify Defender for Endpoint deployment and validation workflows.
+
+
   
