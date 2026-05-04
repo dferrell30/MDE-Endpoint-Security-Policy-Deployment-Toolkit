@@ -396,25 +396,39 @@ $btnDeploy.Add_Click({
 })
 
 $btnExport.Add_Click({
-    $policyName = [Microsoft.VisualBasic.Interaction]::InputBox(
-        "Enter the exact existing Intune Settings Catalog policy name:",
-        "Export Policy JSON",
-        ""
-    )
+    try {
+        Assert-Mg
 
-    if ([string]::IsNullOrWhiteSpace($policyName)) {
-        return
+        $policyName = [Microsoft.VisualBasic.Interaction]::InputBox(
+            "Enter the exact existing Intune Settings Catalog policy name:",
+            "Export Policy JSON",
+            ""
+        )
+
+        if ([string]::IsNullOrWhiteSpace($policyName)) {
+            Add-Log "Export cancelled."
+            return
+        }
+
+        $safeName = ($policyName -replace '^MDE - ','') -replace '^SOURCE - ',''
+        $safeName = $safeName.ToLower() -replace '\s+','-' -replace '[\\/:*?""<>|]',''
+
+        $saveDialog = New-Object System.Windows.Forms.SaveFileDialog
+        $saveDialog.Filter = "JSON files (*.json)|*.json"
+        $saveDialog.InitialDirectory = Join-Path $PSScriptRoot "Config\SettingsCatalog"
+        $saveDialog.FileName = "$safeName.json"
+
+        if ($saveDialog.ShowDialog() -eq "OK") {
+            $result = Export-MDEConfigPolicyJson `
+                -PolicyName $policyName `
+                -OutputPath $saveDialog.FileName
+
+            Add-Result $result.Name $result.Status $result.Details
+            Load-PolicyGrid
+        }
     }
-
-    $saveDialog = New-Object System.Windows.Forms.SaveFileDialog
-    $saveDialog.Filter = "JSON files (*.json)|*.json"
-    $saveDialog.InitialDirectory = Join-Path $PSScriptRoot "Config\SettingsCatalog"
-    $saveDialog.FileName = "firewall.json"
-
-    if ($saveDialog.ShowDialog() -eq "OK") {
-        $result = Export-MDEConfigPolicyJson -PolicyName $policyName -OutputPath $saveDialog.FileName
-        Add-Result $result.Name $result.Status $result.Details
-        Load-PolicyGrid
+    catch {
+        Add-Result "Export" "Failed" $_.Exception.Message
     }
 })
 
