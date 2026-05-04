@@ -4,30 +4,60 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 Add-Type -AssemblyName Microsoft.VisualBasic
 
-# ==============================
-# Load modules by dot-sourcing
-# ==============================
+Import-Module (Join-Path $PSScriptRoot 'Modules\Common.psm1') -Force -DisableNameChecking -Global
+Import-Module (Join-Path $PSScriptRoot 'Modules\Policy.Json.psm1') -Force -DisableNameChecking -Global
 
-$commonPath = Join-Path $PSScriptRoot 'Modules\Common.psm1'
-$baselinePath = Join-Path $PSScriptRoot 'Modules\Baseline.Engine.psm1'
-$policyPath = Join-Path $PSScriptRoot 'Modules\Policy.Json.psm1'
 $assignmentsPath = Join-Path $PSScriptRoot 'Modules\Assignments.psm1'
-
-. $commonPath
-
-if (Test-Path -LiteralPath $baselinePath) {
-    . $baselinePath
-}
-
-. $policyPath
-
 if (Test-Path -LiteralPath $assignmentsPath) {
-    . $assignmentsPath
+    Import-Module $assignmentsPath -Force -DisableNameChecking -Global
 }
 
-# ==============================
-# Theme
-# ==============================
+# Local fallback so UI validation never breaks if module export fails
+if (-not (Get-Command New-MDEPolicyResult -ErrorAction SilentlyContinue)) {
+    function New-MDEPolicyResult {
+        param([string]$Name,[string]$Status,[string]$Details)
+
+        [pscustomobject]@{
+            Name    = $Name
+            Status  = $Status
+            Details = $Details
+            Time    = Get-Date
+        }
+    }
+}
+
+function Test-MDEJsonPolicyFile {
+    param([Parameter(Mandatory)][string]$JsonPath)
+
+    $name = Split-Path -Path $JsonPath -Leaf
+
+    if (-not (Test-Path -LiteralPath $JsonPath)) {
+        return New-MDEPolicyResult -Name $name -Status "Missing" -Details "JSON file not found: $JsonPath"
+    }
+
+    try {
+        $raw = Get-Content -LiteralPath $JsonPath -Raw
+
+        if ([string]::IsNullOrWhiteSpace($raw)) {
+            return New-MDEPolicyResult -Name $name -Status "Invalid" -Details "JSON file is empty"
+        }
+
+        $json = $raw | ConvertFrom-Json
+
+        if (-not ($json.PSObject.Properties.Name -contains 'settings')) {
+            return New-MDEPolicyResult -Name $name -Status "Invalid" -Details "Missing settings array"
+        }
+
+        if (-not $json.settings -or $json.settings.Count -lt 1) {
+            return New-MDEPolicyResult -Name $name -Status "Invalid" -Details "Settings array is empty"
+        }
+
+        return New-MDEPolicyResult -Name $name -Status "Valid" -Details "JSON passed basic validation"
+    }
+    catch {
+        return New-MDEPolicyResult -Name $name -Status "Invalid" -Details $_.Exception.Message
+    }
+}
 
 $Theme = @{
     Back      = [System.Drawing.Color]::FromArgb(18,18,24)
@@ -40,26 +70,13 @@ $Theme = @{
     Border    = [System.Drawing.Color]::FromArgb(70,70,85)
 }
 
-# ==============================
-# Helper functions
-# ==============================
-
 function Add-Log {
     param([string]$Message)
-
-    if ($null -ne $txtLog) {
-        $txtLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] $Message`r`n")
-    }
+    $txtLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] $Message`r`n")
 }
 
 function New-DarkButton {
-    param(
-        [string]$Text,
-        [int]$X,
-        [int]$Y,
-        [int]$W,
-        [int]$H
-    )
+    param([string]$Text,[int]$X,[int]$Y,[int]$W,[int]$H)
 
     $button = New-Object System.Windows.Forms.Button
     $button.Text = $Text
@@ -70,15 +87,11 @@ function New-DarkButton {
     $button.ForeColor = $Theme.Text
     $button.FlatAppearance.BorderColor = $Theme.Border
     $button.FlatAppearance.MouseOverBackColor = $Theme.Accent
-
     return $button
 }
 
 function Set-ResultRowColor {
-    param(
-        [System.Windows.Forms.DataGridViewRow]$Row,
-        [string]$Status
-    )
+    param([System.Windows.Forms.DataGridViewRow]$Row,[string]$Status)
 
     switch ($Status) {
         "Success"  { $Row.DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(22,101,52) }
@@ -96,11 +109,7 @@ function Set-ResultRowColor {
 }
 
 function Add-Result {
-    param(
-        [string]$Name,
-        [string]$Status,
-        [string]$Details
-    )
+    param([string]$Name,[string]$Status,[string]$Details)
 
     $rowIndex = $gridResults.Rows.Add($Name,$Status,$Details)
     Set-ResultRowColor -Row $gridResults.Rows[$rowIndex] -Status $Status
@@ -111,10 +120,7 @@ function Invoke-PolicyDeployFromCatalogItem {
     param([Parameter(Mandatory)]$Policy)
 
     if (-not (Test-Path -LiteralPath $Policy.JsonPath)) {
-        return New-MDEPolicyResult `
-            -Name $Policy.Name `
-            -Status "Skipped" `
-            -Details "Missing JSON file: $($Policy.JsonPath)"
+        return New-MDEPolicyResult -Name $Policy.Name -Status "Skipped" -Details "Missing JSON file: $($Policy.JsonPath)"
     }
 
     $cmd = Get-Command $Policy.Function -ErrorAction Stop
@@ -122,17 +128,18 @@ function Invoke-PolicyDeployFromCatalogItem {
 
     if ($chkAssignAfterDeploy.Checked -and -not $chkWhatIf.Checked) {
         if ($result.Status -in @("Success","Skipped")) {
-            $assignResult = Add-MDEAssignmentFromConfig -PolicyFriendlyName $Policy.Name
-            Add-Result -Name $assignResult.Name -Status $assignResult.Status -Details $assignResult.Details
+            if (Get-Command Add-MDEAssignmentFromConfig -ErrorAction SilentlyContinue) {
+                $assignResult = Add-MDEAssignmentFromConfig -PolicyFriendlyName $Policy.Name
+                Add-Result -Name $assignResult.Name -Status $assignResult.Status -Details $assignResult.Details
+            }
+            else {
+                Add-Result -Name $Policy.Name -Status "Skipped" -Details "Assignment module/function not loaded"
+            }
         }
     }
 
     return $result
 }
-
-# ==============================
-# Main form
-# ==============================
 
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "Microsoft Defender for Endpoint Deployment Tool"
@@ -178,10 +185,6 @@ $form.Controls.Add($chkAssignAfterDeploy)
 $btnInit = New-DarkButton "Initialize Graph" 940 20 120 34
 $form.Controls.Add($btnInit)
 
-# ==============================
-# Policy grid
-# ==============================
-
 $gridPolicies = New-Object System.Windows.Forms.DataGridView
 $gridPolicies.Location = New-Object System.Drawing.Point(20,90)
 $gridPolicies.Size = New-Object System.Drawing.Size(650,430)
@@ -200,17 +203,11 @@ $gridPolicies.AllowUserToAddRows = $false
 $gridPolicies.SelectionMode = 'FullRowSelect'
 $gridPolicies.MultiSelect = $true
 $gridPolicies.AutoSizeColumnsMode = 'Fill'
-
 [void]$gridPolicies.Columns.Add("Name","Policy")
 [void]$gridPolicies.Columns.Add("Category","Category")
 [void]$gridPolicies.Columns.Add("JsonPath","JSON Path")
 [void]$gridPolicies.Columns.Add("Exists","JSON Exists")
-
 $form.Controls.Add($gridPolicies)
-
-# ==============================
-# Results grid
-# ==============================
 
 $gridResults = New-Object System.Windows.Forms.DataGridView
 $gridResults.Location = New-Object System.Drawing.Point(690,90)
@@ -228,16 +225,10 @@ $gridResults.EnableHeadersVisualStyles = $false
 $gridResults.RowHeadersVisible = $false
 $gridResults.AllowUserToAddRows = $false
 $gridResults.AutoSizeColumnsMode = 'Fill'
-
 [void]$gridResults.Columns.Add("Name","Name")
 [void]$gridResults.Columns.Add("Status","Status")
 [void]$gridResults.Columns.Add("Details","Details")
-
 $form.Controls.Add($gridResults)
-
-# ==============================
-# Log box
-# ==============================
 
 $txtLog = New-Object System.Windows.Forms.TextBox
 $txtLog.Location = New-Object System.Drawing.Point(20,540)
@@ -249,10 +240,6 @@ $txtLog.ForeColor = $Theme.Text
 $txtLog.Font = New-Object System.Drawing.Font("Consolas",9)
 $form.Controls.Add($txtLog)
 
-# ==============================
-# Buttons
-# ==============================
-
 $btnRefresh = New-DarkButton "Refresh JSON List" 690 360 170 36
 $btnDeploy = New-DarkButton "Deploy Selected" 890 360 170 36
 $btnExport = New-DarkButton "Export Existing Policy" 690 410 170 36
@@ -262,18 +249,9 @@ $btnValidate = New-DarkButton "Validate JSON" 890 460 170 36
 $btnDeployAll = New-DarkButton "Deploy All Valid" 890 510 170 36
 
 $form.Controls.AddRange(@(
-    $btnRefresh,
-    $btnDeploy,
-    $btnExport,
-    $btnOpenConfig,
-    $btnOpenLogs,
-    $btnValidate,
-    $btnDeployAll
+    $btnRefresh,$btnDeploy,$btnExport,
+    $btnOpenConfig,$btnOpenLogs,$btnValidate,$btnDeployAll
 ))
-
-# ==============================
-# Load policy catalog
-# ==============================
 
 function Load-PolicyGrid {
     $gridPolicies.Rows.Clear()
@@ -292,10 +270,6 @@ function Load-PolicyGrid {
         Add-Log "Failed loading policy catalog: $($_.Exception.Message)"
     }
 }
-
-# ==============================
-# Button actions
-# ==============================
 
 $btnInit.Add_Click({
     try {
@@ -359,9 +333,7 @@ $btnDeploy.Add_Click({
         $policyName = $row.Cells["Name"].Value
         $policy = $catalog | Where-Object { $_.Name -eq $policyName } | Select-Object -First 1
 
-        if (-not $policy) {
-            continue
-        }
+        if (-not $policy) { continue }
 
         try {
             Add-Log "Processing $($policy.Name)..."
@@ -403,6 +375,11 @@ $btnDeployAll.Add_Click({
 
 $btnExport.Add_Click({
     try {
+        if (-not (Get-Command Export-MDEConfigPolicyJson -ErrorAction SilentlyContinue)) {
+            Add-Result -Name "Export" -Status "Failed" -Details "Export-MDEConfigPolicyJson is not loaded from Common.psm1"
+            return
+        }
+
         $policyName = [Microsoft.VisualBasic.Interaction]::InputBox(
             "Enter the exact existing Intune Settings Catalog policy name to export:",
             "Export Policy JSON",
@@ -436,21 +413,17 @@ $btnExport.Add_Click({
 
 $btnOpenConfig.Add_Click({
     $path = Join-Path $PSScriptRoot "Config"
-
     if (-not (Test-Path -LiteralPath $path)) {
         New-Item -ItemType Directory -Path $path -Force | Out-Null
     }
-
     Start-Process $path
 })
 
 $btnOpenLogs.Add_Click({
     $path = Join-Path $PSScriptRoot "Logs"
-
     if (-not (Test-Path -LiteralPath $path)) {
         New-Item -ItemType Directory -Path $path -Force | Out-Null
     }
-
     Start-Process $path
 })
 
