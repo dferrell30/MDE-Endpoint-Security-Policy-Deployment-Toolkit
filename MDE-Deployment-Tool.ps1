@@ -22,6 +22,25 @@ function Assert-Mg {
     }
 }
 
+function Get-MDELogFolder {
+    $path = Join-Path $PSScriptRoot "Logs"
+    if (-not (Test-Path -LiteralPath $path)) {
+        New-Item -ItemType Directory -Path $path -Force | Out-Null
+    }
+    return $path
+}
+
+function Write-MDELogFile {
+    param([string]$Message)
+
+    try {
+        $logFolder = Get-MDELogFolder
+        $logPath = Join-Path $logFolder "deployment.log"
+        Add-Content -LiteralPath $logPath -Value "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $Message"
+    }
+    catch { }
+}
+
 function Get-MDEJsonBody {
     param([string]$Path)
 
@@ -231,6 +250,7 @@ function New-DarkButton {
 function Add-Log {
     param([string]$Message)
     $txtLog.AppendText("[$(Get-Date -Format 'HH:mm:ss')] $Message`r`n")
+    Write-MDELogFile -Message $Message
 }
 
 function Add-Result {
@@ -343,8 +363,17 @@ $btnRefresh = New-DarkButton "Refresh JSON List" 690 360 170 36
 $btnDeploy = New-DarkButton "Deploy Selected" 890 360 170 36
 $btnExport = New-DarkButton "Export Existing Policy" 690 410 170 36
 $btnOpenConfig = New-DarkButton "Open Config Folder" 890 410 170 36
+$btnOpenLogs = New-DarkButton "Open Logs Folder" 690 460 170 36
 $btnValidate = New-DarkButton "Validate JSON" 890 460 170 36
-$form.Controls.AddRange(@($btnRefresh,$btnDeploy,$btnExport,$btnOpenConfig,$btnValidate))
+
+$form.Controls.AddRange(@(
+    $btnRefresh,
+    $btnDeploy,
+    $btnExport,
+    $btnOpenConfig,
+    $btnOpenLogs,
+    $btnValidate
+))
 
 function Load-PolicyGrid {
     $gridPolicies.Rows.Clear()
@@ -433,7 +462,16 @@ $btnExport.Add_Click({
 })
 
 $btnOpenConfig.Add_Click({
-    Start-Process (Join-Path $PSScriptRoot "Config")
+    $path = Join-Path $PSScriptRoot "Config"
+    if (-not (Test-Path -LiteralPath $path)) {
+        New-Item -ItemType Directory -Path $path -Force | Out-Null
+    }
+    Start-Process $path
+})
+
+$btnOpenLogs.Add_Click({
+    $path = Get-MDELogFolder
+    Start-Process $path
 })
 
 Load-PolicyGrid
