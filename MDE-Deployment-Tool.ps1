@@ -23,28 +23,24 @@ function Assert-Mg {
     }
 }
 
-function Get-MDELogFolder {
-    $path = Join-Path $PSScriptRoot "Logs"
+function Get-MDEFolder {
+    param([string]$Name)
+    $path = Join-Path $PSScriptRoot $Name
     if (-not (Test-Path -LiteralPath $path)) {
         New-Item -ItemType Directory -Path $path -Force | Out-Null
     }
     return $path
 }
 
-function Get-MDEReportFolder {
-    $path = Join-Path $PSScriptRoot "Reports"
-    if (-not (Test-Path -LiteralPath $path)) {
-        New-Item -ItemType Directory -Path $path -Force | Out-Null
-    }
-    return $path
-}
+function Get-MDELogFolder { Get-MDEFolder "Logs" }
+function Get-MDEReportFolder { Get-MDEFolder "Reports" }
+function Get-MDEBackupFolder { Get-MDEFolder "Backups" }
 
 function Write-MDELogFile {
     param([string]$Message)
 
     try {
-        $logFolder = Get-MDELogFolder
-        $logPath = Join-Path $logFolder "deployment.log"
+        $logPath = Join-Path (Get-MDELogFolder) "deployment.log"
         Add-Content -LiteralPath $logPath -Value "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $Message"
     }
     catch { }
@@ -88,105 +84,121 @@ function Test-MDEJsonPolicyFile {
     }
 }
 
-function Test-MDEConfigPolicyExists {
-    param([string]$Name)
-
-    Assert-Mg
-
-    $displayName = Get-MDEPolicyName $Name
-    $escaped = $displayName.Replace("'","''")
-    $uri = "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies?`$filter=name eq '$escaped'"
-
-    try {
-        $result = Invoke-MgGraphRequest -Method GET -Uri $uri -OutputType PSObject
-        return [bool]($result.value -and $result.value.Count -gt 0)
-    }
-    catch {
-        return $false
-    }
-}
-
-function Get-MDEConfigPolicyId {
+function Get-MDEConfigPolicy {
     param([string]$PolicyDisplayName)
 
     Assert-Mg
 
     $escaped = $PolicyDisplayName.Replace("'","''")
     $uri = "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies?`$filter=name eq '$escaped'"
-
     $result = Invoke-MgGraphRequest -Method GET -Uri $uri -OutputType PSObject
 
     if (-not $result.value -or $result.value.Count -eq 0) {
-        throw "Policy not found: $PolicyDisplayName"
+        return $null
     }
 
-    return $result.value[0].id
+    return $result.value[0]
 }
 
-function Get-MDEGroupIdByName {
-    param([string]$GroupName)
+function Test-MDEConfigPolicyExists {
+    param([string]$Name)
 
-    Assert-Mg
-
-    $escaped = $GroupName.Replace("'","''")
-    $uri = "https://graph.microsoft.com/v1.0/groups?`$filter=displayName eq '$escaped'"
-
-    $result = Invoke-MgGraphRequest -Method GET -Uri $uri -OutputType PSObject
-
-    if (-not $result.value -or $result.value.Count -eq 0) {
-        throw "Group not found: $GroupName"
-    }
-
-    if ($result.value.Count -gt 1) {
-        throw "Multiple groups found with name: $GroupName"
-    }
-
-    return $result.value[0].id
+    $displayName = Get-MDEPolicyName $Name
+    $policy = Get-MDEConfigPolicy -PolicyDisplayName $displayName
+    return [bool]$policy
 }
 
-function Add-MDEConfigPolicyAssignment {
+function Export-MDEConfigPolicyJsonById {
     param(
-        [string]$PolicyDisplayName,
-        [string]$GroupName
+        [string]$PolicyId,
+        [string]$OutputPath
     )
 
     Assert-Mg
 
-    try {
-        $policyId = Get-MDEConfigPolicyId -PolicyDisplayName $PolicyDisplayName
-        $groupId = Get-MDEGroupIdByName -GroupName $GroupName
+    $policyUri = "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/$PolicyId"
+    $p = Invoke-MgGraphRequest -Method GET -Uri $policyUri -OutputType PSObject
 
-        $body = @{
-            assignments = @(
-                @{
-                    target = @{
-                        "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
-                        groupId = $groupId
-                    }
-                }
-            )
-        } | ConvertTo-Json -Depth 20 -Compress
+    $settingsUri = "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/$PolicyId/settings"
+    $settings = Invoke-MgGraphRequest -Method GET -Uri $settingsUri -OutputType PSObject
 
-        $uri = "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/$policyId/assign"
-
-        Invoke-MgGraphRequest `
-            -Method POST `
-            -Uri $uri `
-            -Body $body `
-            -ContentType "application/json" | Out-Null
-
-        return New-MDEPolicyResult $PolicyDisplayName "Assigned" "Assigned to group: $GroupName"
+    $body = [ordered]@{
+        name            = $p.name
+        description     = $p.description
+        platforms       = $p.platforms
+        technologies    = $p.technologies
+        roleScopeTagIds = @($p.roleScopeTagIds)
+        settings        = @($settings.value)
     }
-    catch {
-        return New-MDEPolicyResult $PolicyDisplayName "Failed" $_.Exception.Message
+
+    if ($p.PSObject.Properties.Name -contains "templateReference" -and $p.templateReference) {
+        $body.templateReference = $p.templateReference
     }
+
+    $folder = Split-Path $OutputPath -Parent
+    if ($folder -and -not (Test-Path -LiteralPath $folder)) {
+        New-Item -ItemType Directory -Path $folder -Force | Out-Null
+    }
+
+    $body | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $OutputPath -Encoding UTF8
+}
+
+function Backup-MDELocalJson {
+    $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+    $source = Join-Path $PSScriptRoot "Config\SettingsCatalog"
+    $dest = Join-Path (Get-MDEBackupFolder) "LocalJson-$timestamp"
+
+    if (-not (Test-Path -LiteralPath $source)) {
+        throw "SettingsCatalog folder not found: $source"
+    }
+
+    New-Item -ItemType Directory -Path $dest -Force | Out-Null
+    Copy-Item -Path (Join-Path $source "*.json") -Destination $dest -Force
+
+    return $dest
+}
+
+function Backup-MDECloudPolicy {
+    param([string]$PolicyDisplayName)
+
+    $policy = Get-MDEConfigPolicy -PolicyDisplayName $PolicyDisplayName
+
+    if (-not $policy) {
+        return $null
+    }
+
+    $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+    $safeName = $PolicyDisplayName.ToLower() -replace '\s+','-' -replace '[\\/:*?""<>|]',''
+    $folder = Join-Path (Get-MDEBackupFolder) "CloudPolicy-$timestamp"
+
+    New-Item -ItemType Directory -Path $folder -Force | Out-Null
+
+    $path = Join-Path $folder "$safeName.json"
+    Export-MDEConfigPolicyJsonById -PolicyId $policy.id -OutputPath $path
+
+    return $path
+}
+
+function Remove-MDEConfigPolicy {
+    param([string]$PolicyDisplayName)
+
+    $policy = Get-MDEConfigPolicy -PolicyDisplayName $PolicyDisplayName
+
+    if (-not $policy) {
+        return $false
+    }
+
+    $uri = "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/$($policy.id)"
+    Invoke-MgGraphRequest -Method DELETE -Uri $uri | Out-Null
+    return $true
 }
 
 function New-MDEConfigPolicyFromJson {
     param(
         [string]$Name,
         [string]$JsonPath,
-        [switch]$WhatIf
+        [switch]$WhatIf,
+        [switch]$UpdateExisting
     )
 
     Assert-Mg
@@ -194,13 +206,24 @@ function New-MDEConfigPolicyFromJson {
     $displayName = Get-MDEPolicyName $Name
 
     try {
-        if (Test-MDEConfigPolicyExists -Name $Name) {
+        $existing = Get-MDEConfigPolicy -PolicyDisplayName $displayName
+
+        if ($existing -and -not $UpdateExisting) {
             return New-MDEPolicyResult $displayName "Skipped" "Policy already exists"
+        }
+
+        if ($existing -and $UpdateExisting) {
+            if ($WhatIf) {
+                return New-MDEPolicyResult $displayName "WhatIf" "Would backup, remove, and recreate existing policy"
+            }
+
+            $backupPath = Backup-MDECloudPolicy -PolicyDisplayName $displayName
+            Remove-MDEConfigPolicy -PolicyDisplayName $displayName | Out-Null
+            Write-MDELogFile "Backed up existing cloud policy [$displayName] to [$backupPath]"
         }
 
         $body = Get-MDEJsonBody -Path $JsonPath
         $body.name = $displayName
-
         $json = $body | ConvertTo-Json -Depth 100 -Compress
 
         if ($WhatIf) {
@@ -212,6 +235,10 @@ function New-MDEConfigPolicyFromJson {
             -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies" `
             -Body $json `
             -ContentType "application/json" | Out-Null
+
+        if ($existing -and $UpdateExisting) {
+            return New-MDEPolicyResult $displayName "Success" "Updated policy by backup, remove, and recreate"
+        }
 
         return New-MDEPolicyResult $displayName "Success" "Created configuration policy"
     }
@@ -229,42 +256,13 @@ function Export-MDEConfigPolicyJson {
     Assert-Mg
 
     try {
-        $escaped = $PolicyName.Replace("'","''")
-        $policyUri = "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies?`$filter=name eq '$escaped'"
-        $policy = Invoke-MgGraphRequest -Method GET -Uri $policyUri -OutputType PSObject
+        $policy = Get-MDEConfigPolicy -PolicyDisplayName $PolicyName
 
-        if (-not $policy.value -or $policy.value.Count -eq 0) {
+        if (-not $policy) {
             throw "Policy not found: $PolicyName"
         }
 
-        $p = $policy.value[0]
-        $settingsUri = "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/$($p.id)/settings"
-        $settings = Invoke-MgGraphRequest -Method GET -Uri $settingsUri -OutputType PSObject
-
-        if (-not $settings.value -or $settings.value.Count -eq 0) {
-            throw "Policy found, but no settings were returned: $PolicyName"
-        }
-
-        $body = [ordered]@{
-            name            = $p.name
-            description     = $p.description
-            platforms       = $p.platforms
-            technologies    = $p.technologies
-            roleScopeTagIds = @($p.roleScopeTagIds)
-            settings        = @($settings.value)
-        }
-
-        if ($p.PSObject.Properties.Name -contains "templateReference" -and $p.templateReference) {
-            $body.templateReference = $p.templateReference
-        }
-
-        $folder = Split-Path $OutputPath -Parent
-        if ($folder -and -not (Test-Path -LiteralPath $folder)) {
-            New-Item -ItemType Directory -Path $folder -Force | Out-Null
-        }
-
-        $body | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $OutputPath -Encoding UTF8
-
+        Export-MDEConfigPolicyJsonById -PolicyId $policy.id -OutputPath $OutputPath
         return New-MDEPolicyResult $PolicyName "Success" "Exported to $OutputPath"
     }
     catch {
@@ -274,60 +272,85 @@ function Export-MDEConfigPolicyJson {
 
 function Get-MDEJsonPolicyCatalog {
     @(
-        [pscustomobject]@{
-            Name="Antivirus"
-            Category="Settings Catalog"
-            JsonPath=(Join-Path $PSScriptRoot "Config\SettingsCatalog\antivirus.json")
-        }
-        [pscustomobject]@{
-            Name="Firewall"
-            Category="Settings Catalog"
-            JsonPath=(Join-Path $PSScriptRoot "Config\SettingsCatalog\firewall.json")
-        }
-        [pscustomobject]@{
-            Name="ASR"
-            Category="Settings Catalog"
-            JsonPath=(Join-Path $PSScriptRoot "Config\SettingsCatalog\asr.json")
-        }
-        [pscustomobject]@{
-            Name="EDR"
-            Category="Settings Catalog"
-            JsonPath=(Join-Path $PSScriptRoot "Config\SettingsCatalog\edr.json")
-        }
-        [pscustomobject]@{
-            Name="Windows Security Experience"
-            Category="Settings Catalog"
-            JsonPath=(Join-Path $PSScriptRoot "Config\SettingsCatalog\windows-security-experience.json")
-        }
-        [pscustomobject]@{
-            Name="AVC Update Controls"
-            Category="Settings Catalog"
-            JsonPath=(Join-Path $PSScriptRoot "Config\SettingsCatalog\avc-update-controls.json")
-        }
+        [pscustomobject]@{ Name="Antivirus"; Category="Settings Catalog"; JsonPath=(Join-Path $PSScriptRoot "Config\SettingsCatalog\antivirus.json") }
+        [pscustomobject]@{ Name="Firewall"; Category="Settings Catalog"; JsonPath=(Join-Path $PSScriptRoot "Config\SettingsCatalog\firewall.json") }
+        [pscustomobject]@{ Name="ASR"; Category="Settings Catalog"; JsonPath=(Join-Path $PSScriptRoot "Config\SettingsCatalog\asr.json") }
+        [pscustomobject]@{ Name="EDR"; Category="Settings Catalog"; JsonPath=(Join-Path $PSScriptRoot "Config\SettingsCatalog\edr.json") }
+        [pscustomobject]@{ Name="Windows Security Experience"; Category="Settings Catalog"; JsonPath=(Join-Path $PSScriptRoot "Config\SettingsCatalog\windows-security-experience.json") }
+        [pscustomobject]@{ Name="AVC Update Controls"; Category="Settings Catalog"; JsonPath=(Join-Path $PSScriptRoot "Config\SettingsCatalog\avc-update-controls.json") }
     )
 }
 
+function Get-MDESettingValue {
+    param($Setting)
+
+    $instance = $Setting.settingInstance
+    if (-not $instance) { return "" }
+
+    if ($instance.PSObject.Properties.Name -contains "choiceSettingValue") {
+        return [string]$instance.choiceSettingValue.value
+    }
+
+    if ($instance.PSObject.Properties.Name -contains "simpleSettingValue") {
+        return [string]$instance.simpleSettingValue.value
+    }
+
+    if ($instance.PSObject.Properties.Name -contains "simpleSettingCollectionValue") {
+        return ($instance.simpleSettingCollectionValue | ConvertTo-Json -Depth 20 -Compress)
+    }
+
+    return ""
+}
+
+function Show-MDEPolicySettingsSummary {
+    param($Policy)
+
+    if (-not (Test-Path -LiteralPath $Policy.JsonPath)) {
+        Add-Result $Policy.Name "Missing" "JSON file not found: $($Policy.JsonPath)"
+        return
+    }
+
+    try {
+        $json = Get-MDEJsonBody -Path $Policy.JsonPath
+        Add-Result $Policy.Name "Summary" "Settings count: $($json.settings.Count)"
+
+        foreach ($setting in $json.settings) {
+            $instance = $setting.settingInstance
+            if (-not $instance) { continue }
+
+            $settingId = $instance.settingDefinitionId
+            $value = Get-MDESettingValue -Setting $setting
+
+            if ([string]::IsNullOrWhiteSpace($value)) {
+                $value = "(no direct value / child settings)"
+            }
+
+            Add-Result $Policy.Name "Setting" "$settingId = $value"
+        }
+    }
+    catch {
+        Add-Result $Policy.Name "Failed" $_.Exception.Message
+    }
+}
+
 function New-MDEDeploymentReport {
-    param(
-        [array]$Results
-    )
+    param([array]$Results)
 
-    $reportFolder = Get-MDEReportFolder
-    $reportPath = Join-Path $reportFolder "deployment-report.html"
-
+    $reportPath = Join-Path (Get-MDEReportFolder) "deployment-report.html"
     $generated = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
 
     $rows = foreach ($r in $Results) {
         $statusClass = switch ($r.Status) {
-            "Success"  { "success" }
-            "Assigned" { "success" }
-            "Valid"    { "success" }
-            "WhatIf"   { "whatif" }
-            "Skipped"  { "skipped" }
-            "Missing"  { "skipped" }
-            "Failed"   { "failed" }
-            "Invalid"  { "failed" }
-            default    { "default" }
+            "Success" { "success" }
+            "Valid" { "success" }
+            "Summary" { "whatif" }
+            "Setting" { "default" }
+            "WhatIf" { "whatif" }
+            "Skipped" { "skipped" }
+            "Missing" { "skipped" }
+            "Failed" { "failed" }
+            "Invalid" { "failed" }
+            default { "default" }
         }
 
         "<tr class='$statusClass'><td>$($r.Time)</td><td>$($r.Name)</td><td>$($r.Status)</td><td>$($r.Details)</td></tr>"
@@ -340,80 +363,32 @@ function New-MDEDeploymentReport {
 <meta charset="UTF-8">
 <title>MDE Deployment Report</title>
 <style>
-body {
-    font-family: Segoe UI, Arial, sans-serif;
-    background: #111827;
-    color: #e5e7eb;
-    margin: 30px;
-}
-h1 {
-    color: #ffffff;
-}
-.badge {
-    display: inline-block;
-    padding: 6px 12px;
-    background: #1f2937;
-    border-radius: 8px;
-    margin-bottom: 20px;
-}
-table {
-    width: 100%;
-    border-collapse: collapse;
-    background: #1f2937;
-}
-th {
-    background: #374151;
-    color: #ffffff;
-    text-align: left;
-    padding: 10px;
-}
-td {
-    padding: 10px;
-    border-bottom: 1px solid #374151;
-}
-tr.success td {
-    background: #14532d;
-}
-tr.whatif td {
-    background: #1e3a8a;
-}
-tr.skipped td {
-    background: #713f12;
-}
-tr.failed td {
-    background: #7f1d1d;
-}
-tr.default td {
-    background: #1f2937;
-}
-.footer {
-    margin-top: 20px;
-    font-size: 12px;
-    color: #9ca3af;
-}
+body { font-family: Segoe UI, Arial, sans-serif; background: #111827; color: #e5e7eb; margin: 30px; }
+h1 { color: #ffffff; }
+.badge { display:inline-block; padding:6px 12px; background:#1f2937; border-radius:8px; margin-bottom:20px; }
+table { width:100%; border-collapse:collapse; background:#1f2937; }
+th { background:#374151; color:#fff; text-align:left; padding:10px; }
+td { padding:10px; border-bottom:1px solid #374151; vertical-align:top; }
+tr.success td { background:#14532d; }
+tr.whatif td { background:#1e3a8a; }
+tr.skipped td { background:#713f12; }
+tr.failed td { background:#7f1d1d; }
+tr.default td { background:#1f2937; }
+.footer { margin-top:20px; font-size:12px; color:#9ca3af; }
 </style>
 </head>
 <body>
 <h1>Microsoft Defender for Endpoint Deployment Report</h1>
 <div class="badge">Generated: $generated</div>
-
 <table>
 <thead>
-<tr>
-<th>Time</th>
-<th>Name</th>
-<th>Status</th>
-<th>Details</th>
-</tr>
+<tr><th>Time</th><th>Name</th><th>Status</th><th>Details</th></tr>
 </thead>
 <tbody>
 $($rows -join "`n")
 </tbody>
 </table>
-
-<div class="footer">
-Generated by MDE Deployment Tool
-</div>
+<div class="footer">Generated by MDE Deployment Tool</div>
 </body>
 </html>
 "@
@@ -462,14 +437,16 @@ function Add-Result {
     $row = $gridResults.Rows.Add($Name,$Status,$Details)
 
     switch ($Status) {
-        "Success"  { $gridResults.Rows[$row].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(22,101,52) }
-        "Assigned" { $gridResults.Rows[$row].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(22,101,52) }
-        "Valid"    { $gridResults.Rows[$row].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(22,101,52) }
-        "WhatIf"   { $gridResults.Rows[$row].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(30,64,175) }
-        "Skipped"  { $gridResults.Rows[$row].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(113,63,18) }
-        "Missing"  { $gridResults.Rows[$row].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(113,63,18) }
-        "Failed"   { $gridResults.Rows[$row].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(127,29,29) }
-        "Invalid"  { $gridResults.Rows[$row].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(127,29,29) }
+        "Success" { $gridResults.Rows[$row].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(22,101,52) }
+        "Valid" { $gridResults.Rows[$row].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(22,101,52) }
+        "Summary" { $gridResults.Rows[$row].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(30,64,175) }
+        "Setting" { $gridResults.Rows[$row].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(31,41,55) }
+        "WhatIf" { $gridResults.Rows[$row].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(30,64,175) }
+        "Skipped" { $gridResults.Rows[$row].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(113,63,18) }
+        "Missing" { $gridResults.Rows[$row].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(113,63,18) }
+        "Failed" { $gridResults.Rows[$row].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(127,29,29) }
+        "Invalid" { $gridResults.Rows[$row].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(127,29,29) }
+        "BackedUp" { $gridResults.Rows[$row].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(22,101,52) }
     }
 
     $gridResults.Rows[$row].DefaultCellStyle.ForeColor = [System.Drawing.Color]::White
@@ -478,7 +455,7 @@ function Add-Result {
 
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "Microsoft Defender for Endpoint Deployment Tool"
-$form.Size = New-Object System.Drawing.Size(1120,740)
+$form.Size = New-Object System.Drawing.Size(1120,760)
 $form.StartPosition = "CenterScreen"
 $form.BackColor = $Theme.Back
 $form.ForeColor = $Theme.Text
@@ -509,21 +486,13 @@ $chkWhatIf.ForeColor = $Theme.Text
 $chkWhatIf.BackColor = $Theme.Back
 $form.Controls.Add($chkWhatIf)
 
-$chkAssignAfterDeploy = New-Object System.Windows.Forms.CheckBox
-$chkAssignAfterDeploy.Text = "Assign after deploy"
-$chkAssignAfterDeploy.Location = New-Object System.Drawing.Point(700,48)
-$chkAssignAfterDeploy.Size = New-Object System.Drawing.Size(180,24)
-$chkAssignAfterDeploy.ForeColor = $Theme.Text
-$chkAssignAfterDeploy.BackColor = $Theme.Back
-$form.Controls.Add($chkAssignAfterDeploy)
-
-$txtGroupName = New-Object System.Windows.Forms.TextBox
-$txtGroupName.Location = New-Object System.Drawing.Point(880,48)
-$txtGroupName.Size = New-Object System.Drawing.Size(210,24)
-$txtGroupName.BackColor = $Theme.PanelAlt
-$txtGroupName.ForeColor = $Theme.Text
-$txtGroupName.Text = "MDE Pilot Devices"
-$form.Controls.Add($txtGroupName)
+$chkUpdateExisting = New-Object System.Windows.Forms.CheckBox
+$chkUpdateExisting.Text = "Update existing policies"
+$chkUpdateExisting.Location = New-Object System.Drawing.Point(700,48)
+$chkUpdateExisting.Size = New-Object System.Drawing.Size(180,24)
+$chkUpdateExisting.ForeColor = $Theme.Text
+$chkUpdateExisting.BackColor = $Theme.Back
+$form.Controls.Add($chkUpdateExisting)
 
 $btnInit = New-DarkButton "Initialize Graph" 940 15 150 28
 $form.Controls.Add($btnInit)
@@ -571,7 +540,7 @@ $form.Controls.Add($gridResults)
 
 $txtLog = New-Object System.Windows.Forms.TextBox
 $txtLog.Location = New-Object System.Drawing.Point(20,540)
-$txtLog.Size = New-Object System.Drawing.Size(1070,135)
+$txtLog.Size = New-Object System.Drawing.Size(1070,145)
 $txtLog.Multiline = $true
 $txtLog.ScrollBars = "Vertical"
 $txtLog.BackColor = [System.Drawing.Color]::FromArgb(12,12,16)
@@ -579,14 +548,16 @@ $txtLog.ForeColor = $Theme.Text
 $txtLog.Font = New-Object System.Drawing.Font("Consolas",9)
 $form.Controls.Add($txtLog)
 
-$btnRefresh = New-DarkButton "Refresh JSON List" 690 360 170 36
-$btnDeploy = New-DarkButton "Deploy Selected" 890 360 200 36
-$btnExport = New-DarkButton "Export Existing Policy" 690 410 170 36
-$btnOpenConfig = New-DarkButton "Open Config Folder" 890 410 200 36
-$btnOpenLogs = New-DarkButton "Open Logs Folder" 690 460 170 36
-$btnValidate = New-DarkButton "Validate JSON" 890 460 200 36
-$btnReport = New-DarkButton "Generate Report" 690 510 170 36
-$btnOpenReports = New-DarkButton "Open Reports Folder" 890 510 200 36
+$btnRefresh = New-DarkButton "Refresh JSON List" 690 360 170 34
+$btnDeploy = New-DarkButton "Deploy Selected" 890 360 200 34
+$btnExport = New-DarkButton "Export Existing Policy" 690 402 170 34
+$btnOpenConfig = New-DarkButton "Open Config Folder" 890 402 200 34
+$btnOpenLogs = New-DarkButton "Open Logs Folder" 690 444 170 34
+$btnValidate = New-DarkButton "Validate JSON" 890 444 200 34
+$btnBackup = New-DarkButton "Backup JSON" 690 486 170 34
+$btnSummary = New-DarkButton "Show Settings Summary" 890 486 200 34
+$btnReport = New-DarkButton "Generate Report" 690 528 170 34
+$btnOpenReports = New-DarkButton "Open Reports Folder" 890 528 200 34
 
 $form.Controls.AddRange(@(
     $btnRefresh,
@@ -595,6 +566,8 @@ $form.Controls.AddRange(@(
     $btnOpenConfig,
     $btnOpenLogs,
     $btnValidate,
+    $btnBackup,
+    $btnSummary,
     $btnReport,
     $btnOpenReports
 ))
@@ -613,8 +586,7 @@ $btnInit.Add_Click({
         Connect-MgGraph -Scopes @(
             "DeviceManagementConfiguration.ReadWrite.All",
             "DeviceManagementManagedDevices.Read.All",
-            "Directory.Read.All",
-            "Group.Read.All"
+            "Directory.Read.All"
         ) -NoWelcome
         Add-Log "Connected to Microsoft Graph."
     }
@@ -639,6 +611,17 @@ $btnDeploy.Add_Click({
     $gridResults.Rows.Clear()
     $script:LastResults = @()
 
+    if ($chkUpdateExisting.Checked -and -not $chkWhatIf.Checked) {
+        try {
+            $backupPath = Backup-MDELocalJson
+            Add-Result "Local JSON Backup" "BackedUp" "Backed up local JSON to $backupPath"
+        }
+        catch {
+            Add-Result "Local JSON Backup" "Failed" $_.Exception.Message
+            return
+        }
+    }
+
     foreach ($row in $gridPolicies.SelectedRows) {
         $name = $row.Cells["Name"].Value
         $path = $row.Cells["JsonPath"].Value
@@ -646,26 +629,10 @@ $btnDeploy.Add_Click({
         $result = New-MDEConfigPolicyFromJson `
             -Name $name `
             -JsonPath $path `
-            -WhatIf:$chkWhatIf.Checked
+            -WhatIf:$chkWhatIf.Checked `
+            -UpdateExisting:$chkUpdateExisting.Checked
 
         Add-Result $result.Name $result.Status $result.Details
-
-        if ($chkAssignAfterDeploy.Checked -and -not $chkWhatIf.Checked) {
-            if ($result.Status -in @("Success","Skipped")) {
-                $groupName = $txtGroupName.Text
-
-                if ([string]::IsNullOrWhiteSpace($groupName)) {
-                    Add-Result $result.Name "Failed" "Assign after deploy selected, but group name is blank."
-                }
-                else {
-                    $assignResult = Add-MDEConfigPolicyAssignment `
-                        -PolicyDisplayName (Get-MDEPolicyName $name) `
-                        -GroupName $groupName
-
-                    Add-Result $assignResult.Name $assignResult.Status $assignResult.Details
-                }
-            }
-        }
     }
 
     if ($script:LastResults.Count -gt 0) {
@@ -720,8 +687,38 @@ $btnOpenConfig.Add_Click({
 })
 
 $btnOpenLogs.Add_Click({
-    $path = Get-MDELogFolder
-    Start-Process $path
+    Start-Process (Get-MDELogFolder)
+})
+
+$btnBackup.Add_Click({
+    try {
+        $backupPath = Backup-MDELocalJson
+        Add-Result "Local JSON Backup" "BackedUp" "Backed up local JSON to $backupPath"
+    }
+    catch {
+        Add-Result "Local JSON Backup" "Failed" $_.Exception.Message
+    }
+})
+
+$btnSummary.Add_Click({
+    $gridResults.Rows.Clear()
+    $script:LastResults = @()
+
+    if ($gridPolicies.SelectedRows.Count -eq 0) {
+        Add-Result "Summary" "Skipped" "Select one or more policies first."
+        return
+    }
+
+    $catalog = Get-MDEJsonPolicyCatalog
+
+    foreach ($row in $gridPolicies.SelectedRows) {
+        $policyName = $row.Cells["Name"].Value
+        $policy = $catalog | Where-Object { $_.Name -eq $policyName } | Select-Object -First 1
+
+        if ($policy) {
+            Show-MDEPolicySettingsSummary -Policy $policy
+        }
+    }
 })
 
 $btnReport.Add_Click({
@@ -735,8 +732,7 @@ $btnReport.Add_Click({
 })
 
 $btnOpenReports.Add_Click({
-    $path = Get-MDEReportFolder
-    Start-Process $path
+    Start-Process (Get-MDEReportFolder)
 })
 
 Load-PolicyGrid
