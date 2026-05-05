@@ -5,6 +5,7 @@ Add-Type -AssemblyName System.Drawing
 Add-Type -AssemblyName Microsoft.VisualBasic
 
 $PolicyPrefix = "MDE"
+$script:LastResults = @()
 
 function New-MDEPolicyResult {
     param([string]$Name,[string]$Status,[string]$Details)
@@ -24,6 +25,14 @@ function Assert-Mg {
 
 function Get-MDELogFolder {
     $path = Join-Path $PSScriptRoot "Logs"
+    if (-not (Test-Path -LiteralPath $path)) {
+        New-Item -ItemType Directory -Path $path -Force | Out-Null
+    }
+    return $path
+}
+
+function Get-MDEReportFolder {
+    $path = Join-Path $PSScriptRoot "Reports"
     if (-not (Test-Path -LiteralPath $path)) {
         New-Item -ItemType Directory -Path $path -Force | Out-Null
     }
@@ -94,6 +103,82 @@ function Test-MDEConfigPolicyExists {
     }
     catch {
         return $false
+    }
+}
+
+function Get-MDEConfigPolicyId {
+    param([string]$PolicyDisplayName)
+
+    Assert-Mg
+
+    $escaped = $PolicyDisplayName.Replace("'","''")
+    $uri = "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies?`$filter=name eq '$escaped'"
+
+    $result = Invoke-MgGraphRequest -Method GET -Uri $uri -OutputType PSObject
+
+    if (-not $result.value -or $result.value.Count -eq 0) {
+        throw "Policy not found: $PolicyDisplayName"
+    }
+
+    return $result.value[0].id
+}
+
+function Get-MDEGroupIdByName {
+    param([string]$GroupName)
+
+    Assert-Mg
+
+    $escaped = $GroupName.Replace("'","''")
+    $uri = "https://graph.microsoft.com/v1.0/groups?`$filter=displayName eq '$escaped'"
+
+    $result = Invoke-MgGraphRequest -Method GET -Uri $uri -OutputType PSObject
+
+    if (-not $result.value -or $result.value.Count -eq 0) {
+        throw "Group not found: $GroupName"
+    }
+
+    if ($result.value.Count -gt 1) {
+        throw "Multiple groups found with name: $GroupName"
+    }
+
+    return $result.value[0].id
+}
+
+function Add-MDEConfigPolicyAssignment {
+    param(
+        [string]$PolicyDisplayName,
+        [string]$GroupName
+    )
+
+    Assert-Mg
+
+    try {
+        $policyId = Get-MDEConfigPolicyId -PolicyDisplayName $PolicyDisplayName
+        $groupId = Get-MDEGroupIdByName -GroupName $GroupName
+
+        $body = @{
+            assignments = @(
+                @{
+                    target = @{
+                        "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
+                        groupId = $groupId
+                    }
+                }
+            )
+        } | ConvertTo-Json -Depth 20 -Compress
+
+        $uri = "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/$policyId/assign"
+
+        Invoke-MgGraphRequest `
+            -Method POST `
+            -Uri $uri `
+            -Body $body `
+            -ContentType "application/json" | Out-Null
+
+        return New-MDEPolicyResult $PolicyDisplayName "Assigned" "Assigned to group: $GroupName"
+    }
+    catch {
+        return New-MDEPolicyResult $PolicyDisplayName "Failed" $_.Exception.Message
     }
 }
 
@@ -222,6 +307,121 @@ function Get-MDEJsonPolicyCatalog {
     )
 }
 
+function New-MDEDeploymentReport {
+    param(
+        [array]$Results
+    )
+
+    $reportFolder = Get-MDEReportFolder
+    $reportPath = Join-Path $reportFolder "deployment-report.html"
+
+    $generated = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+
+    $rows = foreach ($r in $Results) {
+        $statusClass = switch ($r.Status) {
+            "Success"  { "success" }
+            "Assigned" { "success" }
+            "Valid"    { "success" }
+            "WhatIf"   { "whatif" }
+            "Skipped"  { "skipped" }
+            "Missing"  { "skipped" }
+            "Failed"   { "failed" }
+            "Invalid"  { "failed" }
+            default    { "default" }
+        }
+
+        "<tr class='$statusClass'><td>$($r.Time)</td><td>$($r.Name)</td><td>$($r.Status)</td><td>$($r.Details)</td></tr>"
+    }
+
+    $html = @"
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>MDE Deployment Report</title>
+<style>
+body {
+    font-family: Segoe UI, Arial, sans-serif;
+    background: #111827;
+    color: #e5e7eb;
+    margin: 30px;
+}
+h1 {
+    color: #ffffff;
+}
+.badge {
+    display: inline-block;
+    padding: 6px 12px;
+    background: #1f2937;
+    border-radius: 8px;
+    margin-bottom: 20px;
+}
+table {
+    width: 100%;
+    border-collapse: collapse;
+    background: #1f2937;
+}
+th {
+    background: #374151;
+    color: #ffffff;
+    text-align: left;
+    padding: 10px;
+}
+td {
+    padding: 10px;
+    border-bottom: 1px solid #374151;
+}
+tr.success td {
+    background: #14532d;
+}
+tr.whatif td {
+    background: #1e3a8a;
+}
+tr.skipped td {
+    background: #713f12;
+}
+tr.failed td {
+    background: #7f1d1d;
+}
+tr.default td {
+    background: #1f2937;
+}
+.footer {
+    margin-top: 20px;
+    font-size: 12px;
+    color: #9ca3af;
+}
+</style>
+</head>
+<body>
+<h1>Microsoft Defender for Endpoint Deployment Report</h1>
+<div class="badge">Generated: $generated</div>
+
+<table>
+<thead>
+<tr>
+<th>Time</th>
+<th>Name</th>
+<th>Status</th>
+<th>Details</th>
+</tr>
+</thead>
+<tbody>
+$($rows -join "`n")
+</tbody>
+</table>
+
+<div class="footer">
+Generated by MDE Deployment Tool
+</div>
+</body>
+</html>
+"@
+
+    $html | Set-Content -LiteralPath $reportPath -Encoding UTF8
+    return $reportPath
+}
+
 $Theme = @{
     Back     = [System.Drawing.Color]::FromArgb(18,18,24)
     Panel    = [System.Drawing.Color]::FromArgb(30,30,38)
@@ -256,16 +456,20 @@ function Add-Log {
 function Add-Result {
     param([string]$Name,[string]$Status,[string]$Details)
 
+    $resultObject = New-MDEPolicyResult -Name $Name -Status $Status -Details $Details
+    $script:LastResults += $resultObject
+
     $row = $gridResults.Rows.Add($Name,$Status,$Details)
 
     switch ($Status) {
-        "Success" { $gridResults.Rows[$row].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(22,101,52) }
-        "Valid"   { $gridResults.Rows[$row].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(22,101,52) }
-        "WhatIf"  { $gridResults.Rows[$row].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(30,64,175) }
-        "Skipped" { $gridResults.Rows[$row].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(113,63,18) }
-        "Missing" { $gridResults.Rows[$row].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(113,63,18) }
-        "Failed"  { $gridResults.Rows[$row].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(127,29,29) }
-        "Invalid" { $gridResults.Rows[$row].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(127,29,29) }
+        "Success"  { $gridResults.Rows[$row].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(22,101,52) }
+        "Assigned" { $gridResults.Rows[$row].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(22,101,52) }
+        "Valid"    { $gridResults.Rows[$row].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(22,101,52) }
+        "WhatIf"   { $gridResults.Rows[$row].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(30,64,175) }
+        "Skipped"  { $gridResults.Rows[$row].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(113,63,18) }
+        "Missing"  { $gridResults.Rows[$row].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(113,63,18) }
+        "Failed"   { $gridResults.Rows[$row].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(127,29,29) }
+        "Invalid"  { $gridResults.Rows[$row].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(127,29,29) }
     }
 
     $gridResults.Rows[$row].DefaultCellStyle.ForeColor = [System.Drawing.Color]::White
@@ -274,7 +478,7 @@ function Add-Result {
 
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "Microsoft Defender for Endpoint Deployment Tool"
-$form.Size = New-Object System.Drawing.Size(1100,720)
+$form.Size = New-Object System.Drawing.Size(1120,740)
 $form.StartPosition = "CenterScreen"
 $form.BackColor = $Theme.Back
 $form.ForeColor = $Theme.Text
@@ -299,13 +503,29 @@ $form.Controls.Add($subtitle)
 
 $chkWhatIf = New-Object System.Windows.Forms.CheckBox
 $chkWhatIf.Text = "WhatIf / Validate only"
-$chkWhatIf.Location = New-Object System.Drawing.Point(720,25)
+$chkWhatIf.Location = New-Object System.Drawing.Point(700,20)
 $chkWhatIf.Size = New-Object System.Drawing.Size(180,24)
 $chkWhatIf.ForeColor = $Theme.Text
 $chkWhatIf.BackColor = $Theme.Back
 $form.Controls.Add($chkWhatIf)
 
-$btnInit = New-DarkButton "Initialize Graph" 940 20 120 34
+$chkAssignAfterDeploy = New-Object System.Windows.Forms.CheckBox
+$chkAssignAfterDeploy.Text = "Assign after deploy"
+$chkAssignAfterDeploy.Location = New-Object System.Drawing.Point(700,48)
+$chkAssignAfterDeploy.Size = New-Object System.Drawing.Size(180,24)
+$chkAssignAfterDeploy.ForeColor = $Theme.Text
+$chkAssignAfterDeploy.BackColor = $Theme.Back
+$form.Controls.Add($chkAssignAfterDeploy)
+
+$txtGroupName = New-Object System.Windows.Forms.TextBox
+$txtGroupName.Location = New-Object System.Drawing.Point(880,48)
+$txtGroupName.Size = New-Object System.Drawing.Size(210,24)
+$txtGroupName.BackColor = $Theme.PanelAlt
+$txtGroupName.ForeColor = $Theme.Text
+$txtGroupName.Text = "MDE Pilot Devices"
+$form.Controls.Add($txtGroupName)
+
+$btnInit = New-DarkButton "Initialize Graph" 940 15 150 28
 $form.Controls.Add($btnInit)
 
 $gridPolicies = New-Object System.Windows.Forms.DataGridView
@@ -332,7 +552,7 @@ $form.Controls.Add($gridPolicies)
 
 $gridResults = New-Object System.Windows.Forms.DataGridView
 $gridResults.Location = New-Object System.Drawing.Point(690,90)
-$gridResults.Size = New-Object System.Drawing.Size(370,250)
+$gridResults.Size = New-Object System.Drawing.Size(400,250)
 $gridResults.BackgroundColor = $Theme.Panel
 $gridResults.GridColor = $Theme.Border
 $gridResults.DefaultCellStyle.BackColor = $Theme.PanelAlt
@@ -351,7 +571,7 @@ $form.Controls.Add($gridResults)
 
 $txtLog = New-Object System.Windows.Forms.TextBox
 $txtLog.Location = New-Object System.Drawing.Point(20,540)
-$txtLog.Size = New-Object System.Drawing.Size(1040,120)
+$txtLog.Size = New-Object System.Drawing.Size(1070,135)
 $txtLog.Multiline = $true
 $txtLog.ScrollBars = "Vertical"
 $txtLog.BackColor = [System.Drawing.Color]::FromArgb(12,12,16)
@@ -360,11 +580,13 @@ $txtLog.Font = New-Object System.Drawing.Font("Consolas",9)
 $form.Controls.Add($txtLog)
 
 $btnRefresh = New-DarkButton "Refresh JSON List" 690 360 170 36
-$btnDeploy = New-DarkButton "Deploy Selected" 890 360 170 36
+$btnDeploy = New-DarkButton "Deploy Selected" 890 360 200 36
 $btnExport = New-DarkButton "Export Existing Policy" 690 410 170 36
-$btnOpenConfig = New-DarkButton "Open Config Folder" 890 410 170 36
+$btnOpenConfig = New-DarkButton "Open Config Folder" 890 410 200 36
 $btnOpenLogs = New-DarkButton "Open Logs Folder" 690 460 170 36
-$btnValidate = New-DarkButton "Validate JSON" 890 460 170 36
+$btnValidate = New-DarkButton "Validate JSON" 890 460 200 36
+$btnReport = New-DarkButton "Generate Report" 690 510 170 36
+$btnOpenReports = New-DarkButton "Open Reports Folder" 890 510 200 36
 
 $form.Controls.AddRange(@(
     $btnRefresh,
@@ -372,7 +594,9 @@ $form.Controls.AddRange(@(
     $btnExport,
     $btnOpenConfig,
     $btnOpenLogs,
-    $btnValidate
+    $btnValidate,
+    $btnReport,
+    $btnOpenReports
 ))
 
 function Load-PolicyGrid {
@@ -389,7 +613,8 @@ $btnInit.Add_Click({
         Connect-MgGraph -Scopes @(
             "DeviceManagementConfiguration.ReadWrite.All",
             "DeviceManagementManagedDevices.Read.All",
-            "Directory.Read.All"
+            "Directory.Read.All",
+            "Group.Read.All"
         ) -NoWelcome
         Add-Log "Connected to Microsoft Graph."
     }
@@ -402,6 +627,8 @@ $btnRefresh.Add_Click({ Load-PolicyGrid })
 
 $btnValidate.Add_Click({
     $gridResults.Rows.Clear()
+    $script:LastResults = @()
+
     foreach ($p in Get-MDEJsonPolicyCatalog) {
         $result = Test-MDEJsonPolicyFile -JsonPath $p.JsonPath
         Add-Result $result.Name $result.Status $result.Details
@@ -410,6 +637,7 @@ $btnValidate.Add_Click({
 
 $btnDeploy.Add_Click({
     $gridResults.Rows.Clear()
+    $script:LastResults = @()
 
     foreach ($row in $gridPolicies.SelectedRows) {
         $name = $row.Cells["Name"].Value
@@ -421,6 +649,28 @@ $btnDeploy.Add_Click({
             -WhatIf:$chkWhatIf.Checked
 
         Add-Result $result.Name $result.Status $result.Details
+
+        if ($chkAssignAfterDeploy.Checked -and -not $chkWhatIf.Checked) {
+            if ($result.Status -in @("Success","Skipped")) {
+                $groupName = $txtGroupName.Text
+
+                if ([string]::IsNullOrWhiteSpace($groupName)) {
+                    Add-Result $result.Name "Failed" "Assign after deploy selected, but group name is blank."
+                }
+                else {
+                    $assignResult = Add-MDEConfigPolicyAssignment `
+                        -PolicyDisplayName (Get-MDEPolicyName $name) `
+                        -GroupName $groupName
+
+                    Add-Result $assignResult.Name $assignResult.Status $assignResult.Details
+                }
+            }
+        }
+    }
+
+    if ($script:LastResults.Count -gt 0) {
+        $reportPath = New-MDEDeploymentReport -Results $script:LastResults
+        Add-Log "Deployment report generated: $reportPath"
     }
 })
 
@@ -471,6 +721,21 @@ $btnOpenConfig.Add_Click({
 
 $btnOpenLogs.Add_Click({
     $path = Get-MDELogFolder
+    Start-Process $path
+})
+
+$btnReport.Add_Click({
+    if ($script:LastResults.Count -eq 0) {
+        Add-Result "Report" "Skipped" "No results available to report."
+        return
+    }
+
+    $reportPath = New-MDEDeploymentReport -Results $script:LastResults
+    Add-Result "Report" "Success" "Generated: $reportPath"
+})
+
+$btnOpenReports.Add_Click({
+    $path = Get-MDEReportFolder
     Start-Process $path
 })
 
