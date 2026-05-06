@@ -785,7 +785,7 @@ function Add-Result {
 
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "Microsoft Defender for Endpoint Deployment Tool"
-$form.Size = New-Object System.Drawing.Size(1120,820)
+$form.Size = New-Object System.Drawing.Size(1120,900)
 $form.StartPosition = "CenterScreen"
 $form.BackColor = $Theme.Back
 $form.ForeColor = $Theme.Text
@@ -877,8 +877,8 @@ $gridResults.AutoSizeColumnsMode = "Fill"
 $form.Controls.Add($gridResults)
 
 $txtLog = New-Object System.Windows.Forms.TextBox
-$txtLog.Location = New-Object System.Drawing.Point(20,600)
-$txtLog.Size = New-Object System.Drawing.Size(1070,175)
+$txtLog.Location = New-Object System.Drawing.Point(20,575)
+$txtLog.Size = New-Object System.Drawing.Size(1070,280)
 $txtLog.Multiline = $true
 $txtLog.ScrollBars = "Vertical"
 $txtLog.BackColor = [System.Drawing.Color]::FromArgb(12,12,16)
