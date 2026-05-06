@@ -272,39 +272,37 @@ function Export-MDEConfigPolicyJson {
     }
 }
 
+function Get-MDEFriendlyPolicyNameFromFile {
+    param([string]$FileName)
+
+    switch ($FileName.ToLower()) {
+        "antivirus.json"                   { return "Antivirus" }
+        "firewall.json"                    { return "Firewall" }
+        "asr.json"                         { return "ASR" }
+        "edr.json"                         { return "EDR" }
+        "windows-security-experience.json" { return "Windows Security Experience" }
+        "avc-update-controls.json"         { return "AVC Update Controls" }
+        default {
+            $base = [System.IO.Path]::GetFileNameWithoutExtension($FileName)
+            return (($base -replace '-', ' ') -replace '_', ' ')
+        }
+    }
+}
+
 function Get-MDEJsonPolicyCatalog {
-    @(
+    $folder = Join-Path $PSScriptRoot "Config\SettingsCatalog"
+
+    if (-not (Test-Path -LiteralPath $folder)) {
+        New-Item -ItemType Directory -Path $folder -Force | Out-Null
+    }
+
+    Get-ChildItem -Path $folder -Filter "*.json" | Sort-Object Name | ForEach-Object {
         [pscustomobject]@{
-            Name="Antivirus"
-            Category="Settings Catalog"
-            JsonPath=(Join-Path $PSScriptRoot "Config\SettingsCatalog\antivirus.json")
+            Name     = Get-MDEFriendlyPolicyNameFromFile -FileName $_.Name
+            Category = "Settings Catalog"
+            JsonPath = $_.FullName
         }
-        [pscustomobject]@{
-            Name="Firewall"
-            Category="Settings Catalog"
-            JsonPath=(Join-Path $PSScriptRoot "Config\SettingsCatalog\firewall.json")
-        }
-        [pscustomobject]@{
-            Name="ASR"
-            Category="Settings Catalog"
-            JsonPath=(Join-Path $PSScriptRoot "Config\SettingsCatalog\asr.json")
-        }
-        [pscustomobject]@{
-            Name="EDR"
-            Category="Settings Catalog"
-            JsonPath=(Join-Path $PSScriptRoot "Config\SettingsCatalog\edr.json")
-        }
-        [pscustomobject]@{
-            Name="Windows Security Experience"
-            Category="Settings Catalog"
-            JsonPath=(Join-Path $PSScriptRoot "Config\SettingsCatalog\windows-security-experience.json")
-        }
-        [pscustomobject]@{
-            Name="AVC Update Controls"
-            Category="Settings Catalog"
-            JsonPath=(Join-Path $PSScriptRoot "Config\SettingsCatalog\avc-update-controls.json")
-        }
-    )
+    }
 }
 
 function Get-MDESettingValue {
