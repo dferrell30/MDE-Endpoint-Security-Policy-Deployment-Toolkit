@@ -583,6 +583,50 @@ function New-MDEDeploymentReport {
 
         "<tr class='$class'><td><input type='checkbox' disabled $checked></td><td>$(ConvertTo-HtmlEncoded $z.Policy)</td><td>$(ConvertTo-HtmlEncoded $z.Control)</td><td>$(ConvertTo-HtmlEncoded $z.Result)</td><td>$(ConvertTo-HtmlEncoded $z.Found)</td><td>$(ConvertTo-HtmlEncoded $z.Details)</td></tr>"
     }
+function Backup-MDEAllPolicies {
+    Assert-Mg
+
+    try {
+        $timestamp = Get-Date -Format "yyyy-MM-dd_HH-mm"
+        $backupRoot = Join-Path $PSScriptRoot "Backups"
+        $backupFolder = Join-Path $backupRoot $timestamp
+
+        if (-not (Test-Path $backupFolder)) {
+            New-Item -ItemType Directory -Path $backupFolder -Force | Out-Null
+        }
+
+        foreach ($policy in Get-MDEJsonPolicyCatalog) {
+
+            $displayName = Get-MDEPolicyName $policy.Name
+            $safeName = $policy.Name.ToLower() -replace '\s+','-' 
+
+            try {
+                if (-not (Test-MDEConfigPolicyExists -Name $policy.Name)) {
+                    Add-Result $displayName "Skipped" "Policy not found, skipping backup"
+                    continue
+                }
+
+                $outputPath = Join-Path $backupFolder "$safeName.json"
+
+                $result = Export-MDEConfigPolicyJson `
+                    -PolicyName $displayName `
+                    -OutputPath $outputPath
+
+                Add-Result $displayName $result.Status "Backed up to $outputPath"
+            }
+            catch {
+                Add-Result $displayName "Failed" $_.Exception.Message
+            }
+        }
+
+        Add-Log "Backup complete: $backupFolder"
+        Start-Process $backupFolder
+    }
+    catch {
+        Add-Result "Backup All" "Failed" $_.Exception.Message
+    }
+}
+
 
     $html = @"
 <!DOCTYPE html>
@@ -894,6 +938,7 @@ $btnOpenLogs = New-DarkButton "Open Logs Folder" 0 0 150 36
 $btnValidate = New-DarkButton "Validate JSON" 0 0 150 36
 $btnReport = New-DarkButton "Generate Report" 0 0 150 36
 $btnOpenReports = New-DarkButton "Open Reports Folder" 0 0 150 36
+$btnBackupAll = New-DarkButton "Backup All Policies" 0 0 150 36
 
 $buttonPanel = New-Object System.Windows.Forms.FlowLayoutPanel
 $buttonPanel.Location = New-Object System.Drawing.Point(20,315)
@@ -909,6 +954,7 @@ foreach ($button in @(
     $btnRefresh,
     $btnDeploy,
     $btnExport,
+    $btnBackupAll,
     $btnOpenConfig,
     $btnOpenLogs,
     $btnValidate,
