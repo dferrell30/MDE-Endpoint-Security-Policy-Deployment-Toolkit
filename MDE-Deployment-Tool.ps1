@@ -927,15 +927,16 @@ $txtLog.ForeColor = $Theme.Text
 $txtLog.Font = New-Object System.Drawing.Font("Consolas",9)
 $form.Controls.Add($txtLog)
 
+$btnClearResults = New-DarkButton "Clear Results" 0 0 150 36
 $btnRefresh = New-DarkButton "Refresh JSON List" 0 0 150 36
 $btnDeploy = New-DarkButton "Deploy Selected" 0 0 150 36
-$btnExport = New-DarkButton "Export Existing Policy" 0 0 150 36
 $btnOpenConfig = New-DarkButton "Open Config Folder" 0 0 150 36
 $btnOpenLogs = New-DarkButton "Open Logs Folder" 0 0 150 36
 $btnValidate = New-DarkButton "Validate JSON" 0 0 150 36
 $btnReport = New-DarkButton "Generate Report" 0 0 150 36
 $btnOpenReports = New-DarkButton "Open Reports Folder" 0 0 150 36
 $btnBackupAll = New-DarkButton "Backup All Policies" 0 0 150 36
+$btnExport = New-DarkButton "Export Existing Policy" 0 0 150 36
 
 $buttonPanel = New-Object System.Windows.Forms.FlowLayoutPanel
 $buttonPanel.Location = New-Object System.Drawing.Point(20,315)
@@ -950,13 +951,13 @@ $form.Controls.Add($buttonPanel)
 foreach ($button in @(
     $btnRefresh,
     $btnDeploy,
-    $btnExport,
-    $btnBackupAll,
     $btnOpenConfig,
     $btnOpenLogs,
     $btnValidate,
     $btnReport,
-    $btnOpenReports
+    $btnOpenReports,
+    $btnBackupAll,
+    $btnExport,
 )) {
     $button.Size = New-Object System.Drawing.Size(150,36)
     $button.Margin = New-Object System.Windows.Forms.Padding(6)
@@ -985,6 +986,12 @@ $btnInit.Add_Click({
     catch {
         Add-Result "Graph" "Failed" $_.Exception.Message
     }
+})
+
+$btnClearResults.Add_Click({
+    $gridResults.Rows.Clear()
+    $script:LastResults = @()
+    Add-Log "Results table cleared."
 })
 
 $btnRefresh.Add_Click({ Load-PolicyGrid })
