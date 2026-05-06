@@ -589,18 +589,17 @@ function Backup-MDEAllPolicies {
         $backupRoot = Join-Path $PSScriptRoot "Backups"
         $backupFolder = Join-Path $backupRoot $timestamp
 
-        if (-not (Test-Path $backupFolder)) {
+        if (-not (Test-Path -LiteralPath $backupFolder)) {
             New-Item -ItemType Directory -Path $backupFolder -Force | Out-Null
         }
 
         foreach ($policy in Get-MDEJsonPolicyCatalog) {
-
             $displayName = Get-MDEPolicyName $policy.Name
-            $safeName = $policy.Name.ToLower() -replace '\s+','-' 
+            $safeName = $policy.Name.ToLower() -replace '\s+','-' -replace '[\\/:*?""<>|]',''
 
             try {
                 if (-not (Test-MDEConfigPolicyExists -Name $policy.Name)) {
-                    Add-Result $displayName "Skipped" "Policy not found, skipping backup"
+                    Add-Result $displayName "Skipped" "Policy not found in Intune, skipping backup"
                     continue
                 }
 
@@ -624,8 +623,6 @@ function Backup-MDEAllPolicies {
         Add-Result "Backup All" "Failed" $_.Exception.Message
     }
 }
-
-
     $html = @"
 <!DOCTYPE html>
 <html>
@@ -1043,12 +1040,7 @@ $btnBackupAll.Add_Click({
     $gridResults.Rows.Clear()
     $script:LastResults = @()
 
-    try {
-        Backup-MDEAllPolicies
-    }
-    catch {
-        Add-Result "Backup All" "Failed" $_.Exception.Message
-    }
+    Backup-MDEAllPolicies
 })
 
 $btnExport.Add_Click({
