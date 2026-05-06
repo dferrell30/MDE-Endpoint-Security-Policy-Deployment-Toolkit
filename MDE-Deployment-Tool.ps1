@@ -1041,6 +1041,18 @@ $btnDeploy.Add_Click({
     }
 })
 
+$btnBackupAll.Add_Click({
+    $gridResults.Rows.Clear()
+    $script:LastResults = @()
+
+    try {
+        Backup-MDEAllPolicies
+    }
+    catch {
+        Add-Result "Backup All" "Failed" $_.Exception.Message
+    }
+})
+
 $btnExport.Add_Click({
     try {
         Assert-Mg
