@@ -738,26 +738,69 @@ function Backup-MDEAllPolicies {
             New-Item -ItemType Directory -Path $backupFolder -Force | Out-Null
         }
 
+        $summaryPath = Join-Path $backupFolder "backup-summary.txt"
+        Set-Content -LiteralPath $summaryPath -Value "MDE Backup Summary - $timestamp" -Encoding UTF8
+        Add-Content -LiteralPath $summaryPath -Value "Backup Folder: $backupFolder"
+        Add-Content -LiteralPath $summaryPath -Value ""
+
         foreach ($policy in Get-MDEJsonPolicyCatalog) {
-            $displayName = Get-MDEPolicyName $policy.Name
             $safeName = $policy.Name.ToLower() -replace '\s+','-' -replace '[\\/:*?""<>|]',''
+            $outputPath = Join-Path $backupFolder "$safeName.json"
+
+            $candidateNames = @()
+            $candidateNames += Get-MDEPolicyName $policy.Name
+            $candidateNames += $policy.Name
 
             try {
-                if (-not (Test-MDEConfigPolicyExists -Name $policy.Name)) {
-                    Add-Result $displayName "Skipped" "Policy not found in Intune, skipping backup"
-                    continue
+                $json = Get-MDEJsonBody -Path $policy.JsonPath
+
+                if ($json.PSObject.Properties.Name -contains "name") {
+                    if (-not [string]::IsNullOrWhiteSpace($json.name)) {
+                        if ($json.name -ne "__POLICY_NAME__") {
+                            $candidateNames += $json.name
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            $candidateNames = $candidateNames | Select-Object -Unique
+            $backedUp = $false
+            $lastError = ""
+
+            foreach ($candidate in $candidateNames) {
+                try {
+                    $escaped = $candidate.Replace("'","''")
+                    $policyUri = "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies?`$filter=name eq '$escaped'"
+                    $found = Invoke-MgGraphRequest -Method GET -Uri $policyUri -OutputType PSObject
+
+                    if ($found.value -and $found.value.Count -gt 0) {
+                        $result = Export-MDEConfigPolicyJson `
+                            -PolicyName $candidate `
+                            -OutputPath $outputPath
+
+                        Add-Result $candidate $result.Status "Backed up to $outputPath"
+                        Add-Content -LiteralPath $summaryPath -Value "SUCCESS: $candidate -> $outputPath"
+
+                        $backedUp = $true
+                        break
+                    }
+                }
+                catch {
+                    $lastError = $_.Exception.Message
+                }
+            }
+
+            if (-not $backedUp) {
+                $tried = $candidateNames -join " | "
+                $message = "No matching Intune policy found. Tried: $tried"
+
+                if (-not [string]::IsNullOrWhiteSpace($lastError)) {
+                    $message = "$message. Last error: $lastError"
                 }
 
-                $outputPath = Join-Path $backupFolder "$safeName.json"
-
-                $result = Export-MDEConfigPolicyJson `
-                    -PolicyName $displayName `
-                    -OutputPath $outputPath
-
-                Add-Result $displayName $result.Status "Backed up to $outputPath"
-            }
-            catch {
-                Add-Result $displayName "Failed" $_.Exception.Message
+                Add-Result $policy.Name "Skipped" $message
+                Add-Content -LiteralPath $summaryPath -Value "SKIPPED: $($policy.Name) - Tried: $tried"
             }
         }
 
@@ -930,13 +973,13 @@ $form.Controls.Add($txtLog)
 $btnClearResults = New-DarkButton "Clear Results" 0 0 150 36
 $btnRefresh = New-DarkButton "Refresh JSON List" 0 0 150 36
 $btnDeploy = New-DarkButton "Deploy Selected" 0 0 150 36
+$btnExport = New-DarkButton "Export Existing Policy" 0 0 150 36
 $btnOpenConfig = New-DarkButton "Open Config Folder" 0 0 150 36
 $btnOpenLogs = New-DarkButton "Open Logs Folder" 0 0 150 36
 $btnValidate = New-DarkButton "Validate JSON" 0 0 150 36
 $btnReport = New-DarkButton "Generate Report" 0 0 150 36
 $btnOpenReports = New-DarkButton "Open Reports Folder" 0 0 150 36
 $btnBackupAll = New-DarkButton "Backup All Policies" 0 0 150 36
-$btnExport = New-DarkButton "Export Existing Policy" 0 0 150 36
 
 $buttonPanel = New-Object System.Windows.Forms.FlowLayoutPanel
 $buttonPanel.Location = New-Object System.Drawing.Point(20,315)
@@ -951,13 +994,14 @@ $form.Controls.Add($buttonPanel)
 foreach ($button in @(
     $btnRefresh,
     $btnDeploy,
+    $btnExport,
+    $btnBackupAll,
     $btnOpenConfig,
     $btnOpenLogs,
     $btnValidate,
     $btnReport,
     $btnOpenReports,
-    $btnBackupAll,
-    $btnExport,
+    $btnClearResults
 )) {
     $button.Size = New-Object System.Drawing.Size(150,36)
     $button.Margin = New-Object System.Windows.Forms.Padding(6)
