@@ -607,21 +607,6 @@ h1, h2 {
     border-radius: 8px;
     margin-bottom: 20px;
 }
-.summary {
-    display: flex;
-    gap: 12px;
-    margin: 20px 0;
-}
-.card {
-    background: #1f2937;
-    padding: 14px;
-    border-radius: 10px;
-    min-width: 140px;
-}
-.card strong {
-    display: block;
-    font-size: 22px;
-}
 table {
     width: 100%;
     border-collapse: collapse;
@@ -800,7 +785,7 @@ function Add-Result {
 
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "Microsoft Defender for Endpoint Deployment Tool"
-$form.Size = New-Object System.Drawing.Size(1120,740)
+$form.Size = New-Object System.Drawing.Size(1120,820)
 $form.StartPosition = "CenterScreen"
 $form.BackColor = $Theme.Back
 $form.ForeColor = $Theme.Text
@@ -852,7 +837,7 @@ $form.Controls.Add($btnInit)
 
 $gridPolicies = New-Object System.Windows.Forms.DataGridView
 $gridPolicies.Location = New-Object System.Drawing.Point(20,90)
-$gridPolicies.Size = New-Object System.Drawing.Size(650,430)
+$gridPolicies.Size = New-Object System.Drawing.Size(650,200)
 $gridPolicies.BackgroundColor = $Theme.Panel
 $gridPolicies.GridColor = $Theme.Border
 $gridPolicies.DefaultCellStyle.BackColor = $Theme.PanelAlt
@@ -892,8 +877,8 @@ $gridResults.AutoSizeColumnsMode = "Fill"
 $form.Controls.Add($gridResults)
 
 $txtLog = New-Object System.Windows.Forms.TextBox
-$txtLog.Location = New-Object System.Drawing.Point(20,540)
-$txtLog.Size = New-Object System.Drawing.Size(1070,135)
+$txtLog.Location = New-Object System.Drawing.Point(20,600)
+$txtLog.Size = New-Object System.Drawing.Size(1070,175)
 $txtLog.Multiline = $true
 $txtLog.ScrollBars = "Vertical"
 $txtLog.BackColor = [System.Drawing.Color]::FromArgb(12,12,16)
@@ -901,16 +886,26 @@ $txtLog.ForeColor = $Theme.Text
 $txtLog.Font = New-Object System.Drawing.Font("Consolas",9)
 $form.Controls.Add($txtLog)
 
-$btnRefresh = New-DarkButton "Refresh JSON List" 690 360 170 36
-$btnDeploy = New-DarkButton "Deploy Selected" 890 360 200 36
-$btnExport = New-DarkButton "Export Existing Policy" 690 410 170 36
-$btnOpenConfig = New-DarkButton "Open Config Folder" 890 410 200 36
-$btnOpenLogs = New-DarkButton "Open Logs Folder" 690 460 170 36
-$btnValidate = New-DarkButton "Validate JSON" 890 460 200 36
-$btnReport = New-DarkButton "Generate Report" 690 510 170 36
-$btnOpenReports = New-DarkButton "Open Reports Folder" 890 510 200 36
+$btnRefresh = New-DarkButton "Refresh JSON List" 0 0 150 36
+$btnDeploy = New-DarkButton "Deploy Selected" 0 0 150 36
+$btnExport = New-DarkButton "Export Existing Policy" 0 0 150 36
+$btnOpenConfig = New-DarkButton "Open Config Folder" 0 0 150 36
+$btnOpenLogs = New-DarkButton "Open Logs Folder" 0 0 150 36
+$btnValidate = New-DarkButton "Validate JSON" 0 0 150 36
+$btnReport = New-DarkButton "Generate Report" 0 0 150 36
+$btnOpenReports = New-DarkButton "Open Reports Folder" 0 0 150 36
 
-$form.Controls.AddRange(@(
+$buttonPanel = New-Object System.Windows.Forms.FlowLayoutPanel
+$buttonPanel.Location = New-Object System.Drawing.Point(20,315)
+$buttonPanel.Size = New-Object System.Drawing.Size(650,265)
+$buttonPanel.BackColor = $Theme.Back
+$buttonPanel.FlowDirection = "LeftToRight"
+$buttonPanel.WrapContents = $true
+$buttonPanel.AutoScroll = $false
+$buttonPanel.Padding = New-Object System.Windows.Forms.Padding(4)
+$form.Controls.Add($buttonPanel)
+
+foreach ($button in @(
     $btnRefresh,
     $btnDeploy,
     $btnExport,
@@ -919,7 +914,11 @@ $form.Controls.AddRange(@(
     $btnValidate,
     $btnReport,
     $btnOpenReports
-))
+)) {
+    $button.Size = New-Object System.Drawing.Size(150,36)
+    $button.Margin = New-Object System.Windows.Forms.Padding(6)
+    $buttonPanel.Controls.Add($button)
+}
 
 function Load-PolicyGrid {
     $gridPolicies.Rows.Clear()
