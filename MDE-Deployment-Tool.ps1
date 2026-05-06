@@ -39,6 +39,14 @@ function Get-MDEReportFolder {
     return $path
 }
 
+function Get-MDEBackupFolderRoot {
+    $path = Join-Path $PSScriptRoot "Backups"
+    if (-not (Test-Path -LiteralPath $path)) {
+        New-Item -ItemType Directory -Path $path -Force | Out-Null
+    }
+    return $path
+}
+
 function Write-MDELogFile {
     param([string]$Message)
 
@@ -88,18 +96,31 @@ function Test-MDEJsonPolicyFile {
     }
 }
 
-function Test-MDEConfigPolicyExists {
-    param([string]$Name)
+function Find-MDEConfigPolicyByName {
+    param([string]$PolicyName)
 
     Assert-Mg
 
-    $displayName = Get-MDEPolicyName $Name
-    $escaped = $displayName.Replace("'","''")
+    $escaped = $PolicyName.Replace("'","''")
     $uri = "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies?`$filter=name eq '$escaped'"
 
+    $result = Invoke-MgGraphRequest -Method GET -Uri $uri -OutputType PSObject
+
+    if ($result.value -and $result.value.Count -gt 0) {
+        return $result.value[0]
+    }
+
+    return $null
+}
+
+function Test-MDEConfigPolicyExists {
+    param([string]$Name)
+
+    $displayName = Get-MDEPolicyName $Name
+
     try {
-        $result = Invoke-MgGraphRequest -Method GET -Uri $uri -OutputType PSObject
-        return [bool]($result.value -and $result.value.Count -gt 0)
+        $policy = Find-MDEConfigPolicyByName -PolicyName $displayName
+        return [bool]$policy
     }
     catch {
         return $false
@@ -109,18 +130,13 @@ function Test-MDEConfigPolicyExists {
 function Get-MDEConfigPolicyId {
     param([string]$PolicyDisplayName)
 
-    Assert-Mg
+    $policy = Find-MDEConfigPolicyByName -PolicyName $PolicyDisplayName
 
-    $escaped = $PolicyDisplayName.Replace("'","''")
-    $uri = "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies?`$filter=name eq '$escaped'"
-
-    $result = Invoke-MgGraphRequest -Method GET -Uri $uri -OutputType PSObject
-
-    if (-not $result.value -or $result.value.Count -eq 0) {
+    if (-not $policy) {
         throw "Policy not found: $PolicyDisplayName"
     }
 
-    return $result.value[0].id
+    return $policy.id
 }
 
 function Get-MDEGroupIdByName {
@@ -229,16 +245,13 @@ function Export-MDEConfigPolicyJson {
     Assert-Mg
 
     try {
-        $escaped = $PolicyName.Replace("'","''")
-        $policyUri = "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies?`$filter=name eq '$escaped'"
-        $policy = Invoke-MgGraphRequest -Method GET -Uri $policyUri -OutputType PSObject
+        $policy = Find-MDEConfigPolicyByName -PolicyName $PolicyName
 
-        if (-not $policy.value -or $policy.value.Count -eq 0) {
+        if (-not $policy) {
             throw "Policy not found: $PolicyName"
         }
 
-        $p = $policy.value[0]
-        $settingsUri = "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/$($p.id)/settings"
+        $settingsUri = "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/$($policy.id)/settings"
         $settings = Invoke-MgGraphRequest -Method GET -Uri $settingsUri -OutputType PSObject
 
         if (-not $settings.value -or $settings.value.Count -eq 0) {
@@ -246,16 +259,16 @@ function Export-MDEConfigPolicyJson {
         }
 
         $body = [ordered]@{
-            name            = $p.name
-            description     = $p.description
-            platforms       = $p.platforms
-            technologies    = $p.technologies
-            roleScopeTagIds = @($p.roleScopeTagIds)
+            name            = $policy.name
+            description     = $policy.description
+            platforms       = $policy.platforms
+            technologies    = $policy.technologies
+            roleScopeTagIds = @($policy.roleScopeTagIds)
             settings        = @($settings.value)
         }
 
-        if ($p.PSObject.Properties.Name -contains "templateReference" -and $p.templateReference) {
-            $body.templateReference = $p.templateReference
+        if ($policy.PSObject.Properties.Name -contains "templateReference" -and $policy.templateReference) {
+            $body.templateReference = $policy.templateReference
         }
 
         $folder = Split-Path $OutputPath -Parent
@@ -581,6 +594,7 @@ function New-MDEDeploymentReport {
 
         "<tr class='$class'><td><input type='checkbox' disabled $checked></td><td>$(ConvertTo-HtmlEncoded $z.Policy)</td><td>$(ConvertTo-HtmlEncoded $z.Control)</td><td>$(ConvertTo-HtmlEncoded $z.Result)</td><td>$(ConvertTo-HtmlEncoded $z.Found)</td><td>$(ConvertTo-HtmlEncoded $z.Details)</td></tr>"
     }
+
     $html = @"
 <!DOCTYPE html>
 <html>
@@ -731,35 +745,82 @@ function Backup-MDEAllPolicies {
 
     try {
         $timestamp = Get-Date -Format "yyyy-MM-dd_HH-mm"
-        $backupRoot = Join-Path $PSScriptRoot "Backups"
+        $backupRoot = Get-MDEBackupFolderRoot
         $backupFolder = Join-Path $backupRoot $timestamp
 
         if (-not (Test-Path -LiteralPath $backupFolder)) {
             New-Item -ItemType Directory -Path $backupFolder -Force | Out-Null
         }
 
+        $summaryPath = Join-Path $backupFolder "backup-summary.txt"
+        Set-Content -LiteralPath $summaryPath -Value "MDE Backup Summary - $timestamp" -Encoding UTF8
+        Add-Content -LiteralPath $summaryPath -Value "Backup Folder: $backupFolder"
+        Add-Content -LiteralPath $summaryPath -Value ""
+
         foreach ($policy in Get-MDEJsonPolicyCatalog) {
-            $displayName = Get-MDEPolicyName $policy.Name
             $safeName = $policy.Name.ToLower() -replace '\s+','-' -replace '[\\/:*?""<>|]',''
+            $outputPath = Join-Path $backupFolder "$safeName.json"
+
+            $candidateNames = @()
+            $candidateNames += Get-MDEPolicyName $policy.Name
+            $candidateNames += $policy.Name
 
             try {
-                if (-not (Test-MDEConfigPolicyExists -Name $policy.Name)) {
-                    Add-Result $displayName "Skipped" "Policy not found in Intune, skipping backup"
-                    continue
+                $json = Get-MDEJsonBody -Path $policy.JsonPath
+
+                if ($json.PSObject.Properties.Name -contains "name") {
+                    if (-not [string]::IsNullOrWhiteSpace($json.name)) {
+                        if ($json.name -ne "__POLICY_NAME__") {
+                            $candidateNames += $json.name
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            $candidateNames = $candidateNames |
+                Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+                Select-Object -Unique
+
+            $backedUp = $false
+            $lastError = ""
+
+            foreach ($candidate in $candidateNames) {
+                try {
+                    $found = Find-MDEConfigPolicyByName -PolicyName $candidate
+
+                    if ($found) {
+                        $result = Export-MDEConfigPolicyJson `
+                            -PolicyName $candidate `
+                            -OutputPath $outputPath
+
+                        Add-Result $candidate $result.Status "Backed up to $outputPath"
+                        Add-Content -LiteralPath $summaryPath -Value "SUCCESS: $candidate -> $outputPath"
+
+                        $backedUp = $true
+                        break
+                    }
+                }
+                catch {
+                    $lastError = $_.Exception.Message
+                }
+            }
+
+            if (-not $backedUp) {
+                $tried = $candidateNames -join " | "
+                $message = "No matching Intune policy found. Tried: $tried"
+
+                if (-not [string]::IsNullOrWhiteSpace($lastError)) {
+                    $message = "$message. Last error: $lastError"
                 }
 
-                $outputPath = Join-Path $backupFolder "$safeName.json"
-
-                $result = Export-MDEConfigPolicyJson `
-                    -PolicyName $displayName `
-                    -OutputPath $outputPath
-
-                Add-Result $displayName $result.Status "Backed up to $outputPath"
-            }
-            catch {
-                Add-Result $displayName "Failed" $_.Exception.Message
+                Add-Result $policy.Name "Skipped" $message
+                Add-Content -LiteralPath $summaryPath -Value "SKIPPED: $($policy.Name) - $message"
             }
         }
+
+        Add-Content -LiteralPath $summaryPath -Value ""
+        Add-Content -LiteralPath $summaryPath -Value "Completed: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
 
         Add-Log "Backup complete: $backupFolder"
         Start-Process $backupFolder
@@ -768,7 +829,6 @@ function Backup-MDEAllPolicies {
         Add-Result "Backup All" "Failed" $_.Exception.Message
     }
 }
-
 
 $Theme = @{
     Back     = [System.Drawing.Color]::FromArgb(18,18,24)
