@@ -998,14 +998,16 @@ $btnOpenReports = New-DarkButton "Open Reports Folder" 0 0 150 36
 $btnBackupAll = New-DarkButton "Backup All Policies" 0 0 150 36
 $btnExport = New-DarkButton "Export Existing Policy" 0 0 150 36
 
+# Button action area with visible border
 $buttonPanel = New-Object System.Windows.Forms.FlowLayoutPanel
 $buttonPanel.Location = New-Object System.Drawing.Point(20,315)
-$buttonPanel.Size = New-Object System.Drawing.Size(650,265)
+$buttonPanel.Size = New-Object System.Drawing.Size(650,245)
 $buttonPanel.BackColor = $Theme.Back
+$buttonPanel.BorderStyle = [System.Windows.Forms.BorderStyle]::FixedSingle
 $buttonPanel.FlowDirection = "LeftToRight"
 $buttonPanel.WrapContents = $true
 $buttonPanel.AutoScroll = $false
-$buttonPanel.Padding = New-Object System.Windows.Forms.Padding(4)
+$buttonPanel.Padding = New-Object System.Windows.Forms.Padding(10)
 $form.Controls.Add($buttonPanel)
 
 foreach ($button in @(
