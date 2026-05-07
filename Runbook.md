@@ -273,27 +273,29 @@ Steps
 
 Step	Action
 
-1	Deploy or validate policies
-2	Click Generate Report
+-1	Deploy or validate policies
+-2	Click Generate Report
 
 Report Includes
-Section	Description
-Deployment Results	Deployment status tracking
-Settings Inventory	Deployed setting visibility
-Zero Trust Checklist	Security alignment visibility
-Output Location
-Reports\deployment-report.html
+
+-Section	Description
+-Deployment Results	Deployment status tracking
+-Settings Inventory	Deployed setting visibility
+-Zero Trust Checklist	Security alignment visibility
+-Output Location
+-Reports\deployment-report.html
 
 ## 📂 Open Config / Logs / Reports
-Button	Opens
-Open Config Folder	Config directory
-Open Logs Folder	Logs directory
-Open Reports Folder	Reports directory
-Important Files
-File	Purpose
-deployment.log	Deployment logging
-deployment-report.html	HTML report
-backup-summary.txt	Backup summary
+
+-Button	Opens
+-Open Config Folder	Config directory
+-Open Logs Folder	Logs directory
+-Open Reports Folder	Reports directory
+-Important Files
+-File	Purpose
+-deployment.log	Deployment logging
+-deployment-report.html	HTML report
+-backup-summary.txt	Backup summary
 
 ## 🧹 Clear Results
 
@@ -310,13 +312,16 @@ Clear Results
 ✅ Expected Outcome
 
 Result
+
 Results table clears
 Logs remain
 Reports remain
 Policies remain
 
 ## 🧪 Scenarios and Expected Outcomes
+
 Scenario 1 — Initial Validation
+
 Steps
 Step	Action
 1	Launch tool
@@ -324,8 +329,10 @@ Step	Action
 3	Validate JSON
 
 ## ✅ Expected Outcome
+
 Result
 All JSON files validate successfully
+
 Scenario 2 — Safe Deployment Test
 Steps
 Step	Action
@@ -369,22 +376,32 @@ Step	Action
 3	Refresh JSON List
 
 ✅ Expected Outcome
+
 Result
+
 Exported JSON appears automatically
+
 Scenario 7 — Backup Policies
+
 Steps
+
 Step	Action
-1	Initialize Graph
-2	Backup All Policies
+-1	Initialize Graph
+-2	Backup All Policies
 
 ✅ Expected Outcome
+
 Result
+
 Timestamped backup folder created
+
 Scenario 8 — Generate Report
+
 Steps
+
 Step	Action
-1	Deploy or validate
-2	Generate Report
+-1	Deploy or validate
+-2	Generate Report
 
 ✅ Expected Outcome
 Result
@@ -399,9 +416,9 @@ MDE -
 
 Example:
 
-JSON Name	Intune Policy Name
-Firewall	MDE - Firewall
-Dynamic JSON Loading
+-JSON Name	Intune Policy Name
+-Firewall	MDE - Firewall
+-Dynamic JSON Loading
 
 Any .json placed into:
 
@@ -409,12 +426,12 @@ Config\SettingsCatalog
 
 will automatically appear after:
 
-Refresh JSON List
-Antivirus Note
-Note	Details
-Supported	Settings Catalog AV policies
-Not Fully Supported	Full Endpoint Security Antivirus profile imports
-EDR Note
+-Refresh JSON List
+-Antivirus Note
+-Note	Details
+-Supported	Settings Catalog AV policies
+-Not Fully Supported	Full Endpoint Security Antivirus profile imports
+-EDR Note
 
 Avoid including:
 
@@ -428,13 +445,14 @@ Standard Operational Flow
 Backup → Validate → WhatIf → Deploy → Assign → Report
 Recommended Steps
 Step	Action
-1	Run tool
-2	Initialize Graph
-3	Refresh JSON List
-4	Validate JSON
-5	Backup All Policies
-6	Run WhatIf
-7	Deploy policies
+
+-1	Run tool
+-2	Initialize Graph
+-3	Refresh JSON List
+-4	Validate JSON
+-5	Backup All Policies
+-6	Run WhatIf
+-7	Deploy policies
 8	Assign to pilot group
 9	Generate report
 10	Review logs and report
