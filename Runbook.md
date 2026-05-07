@@ -204,13 +204,16 @@ Skipped	Policy already exists
 Failed	Graph deployment failure
 
 ## 👥 Assigning Policies
+
 Steps
+
 Step	Action
 1	Enter Entra group name
 2	Enable Assign after deploy
 3	Deploy policy
+
 Example Group
-MDE Pilot Devices
+MDE Pilot Devices (You can create a group or type the name of any existing created group)
 
 ✅ Expected Outcome
 Assigned - Assigned to group: MDE Pilot Devices
