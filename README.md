@@ -47,7 +47,10 @@ This tool provides a **simple deployment engine** that:
 - 🛡️ Attack Surface Reduction (ASR)  
 - 📡 Endpoint Detection & Response (EDR) *(supported settings only)*  
 - 🪟 Windows Security Experience  
-- 🛡️ Defender Antivirus *(Settings Catalog / AV Configuration Controls)*  
+- 🛡️ Defender Antivirus *(Settings Catalog / AV Configuration Controls)*
+  
+
+<img width="650" height="205" alt="image" src="https://github.com/user-attachments/assets/511d8189-dd0f-4400-9897-dd43dc6b0a92" />
 
 ---
 
