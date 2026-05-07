@@ -9,6 +9,8 @@ A lightweight, JSON-driven deployment tool for Microsoft Defender for Endpoint (
 
 This project simplifies how Defender policies are deployed by enabling **repeatable, consistent security baselines** across environments.
 
+<img width="1084" height="881" alt="image" src="https://github.com/user-attachments/assets/6bd8f83f-083a-4b30-b26f-c6ee7029cab6" />
+
 ---
 
 ## 🚀 Overview
