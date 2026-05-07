@@ -42,17 +42,19 @@ The tool supports:
 ✅ Deployment validation
 
 # ⚡ Capabilities
+
 Capability	Description
-Settings Catalog Deployment	Deploy Defender Settings Catalog policies
-JSON Validation	Validate JSON before deployment
-WhatIf Validation	Safe deployment testing
-Policy Export	Export existing Intune policies
-Policy Backup	Backup deployed policies
-Dynamic JSON Discovery	Auto-load JSON from repo
-Assignment Support	Assign policies automatically
-HTML Reporting	Generate deployment evidence reports
-Zero Trust Checklist	Visibility into baseline alignment
-Logging	Detailed deployment logging
+
+-Settings Catalog Deployment	Deploy Defender Settings Catalog policies
+-JSON Validation	Validate JSON before deployment
+-WhatIf Validation	Safe deployment testing
+-Policy Export	Export existing Intune policies
+-Policy Backup	Backup deployed policies
+-Dynamic JSON Discovery	Auto-load JSON from repo
+-Assignment Support	Assign policies automatically
+-HTML Reporting	Generate deployment evidence reports
+-Zero Trust Checklist	Visibility into baseline alignment
+-Logging	Detailed deployment logging
 
 # 📋 Prerequisites
 
